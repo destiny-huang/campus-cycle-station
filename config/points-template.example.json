@@ -1,0 +1,80 @@
+{
+  "template_version": "draft-0.2",
+  "status": "proposed_configurable_defaults",
+  "note": "用于试运行的项目建议，不是用户已逐项确认的定价，不与人民币兑换。类别不自动决定柜位尺寸。",
+  "rounding": "nearest_integer_half_up_for_positive_values",
+  "formula": "category_base_points * condition_multiplier",
+  "condition_multipliers": {
+    "near_new": 1.2,
+    "normal": 1.0,
+    "worn_but_complete": 0.8
+  },
+  "categories": [
+    {
+      "id": "writing",
+      "name": "普通书写工具",
+      "base_points": 2,
+      "example": "可正常使用的单支笔"
+    },
+    {
+      "id": "consumable",
+      "name": "小型文具耗材",
+      "base_points": 3,
+      "example": "剩余量充足的橡皮、胶棒或修正带"
+    },
+    {
+      "id": "drawing",
+      "name": "基础绘图工具",
+      "base_points": 4,
+      "example": "直尺、三角尺、量角器"
+    },
+    {
+      "id": "notebook",
+      "name": "本册与文件收纳",
+      "base_points": 5,
+      "example": "未使用笔记本或文件夹"
+    },
+    {
+      "id": "pencil_case",
+      "name": "文具收纳用品",
+      "base_points": 8,
+      "example": "文具盒或笔袋"
+    },
+    {
+      "id": "book",
+      "name": "图书",
+      "base_points": 10,
+      "example": "完整且适用的课外书或教辅书"
+    },
+    {
+      "id": "materials",
+      "name": "手工材料与学习套件",
+      "base_points": 10,
+      "example": "可整体领取的材料包"
+    },
+    {
+      "id": "puzzle",
+      "name": "棋类与益智用品",
+      "base_points": 15,
+      "example": "配件齐全的一套棋具"
+    },
+    {
+      "id": "sports",
+      "name": "体育用品",
+      "base_points": 20,
+      "example": "状态良好的球类"
+    },
+    {
+      "id": "durable",
+      "name": "较高价值耐用品",
+      "base_points": 25,
+      "example": "状态良好的书包或完整模型"
+    }
+  ],
+  "teacher_final_confirmation_required": true,
+  "redemption_equals_donation_reward": {
+    "default": true,
+    "status": "proposed_not_separately_confirmed"
+  },
+  "eligibility_note": "无法正常使用、不适合赠与的物品不以低分代替拒收；照片无法确认的情况交教师核验。"
+}
