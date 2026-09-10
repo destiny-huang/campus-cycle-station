@@ -1,20 +1,34 @@
 # 校园循环站 / Campus Cycle Station
 
-本目录是开发启动资料，不是已开发完成的网站。不要用来覆盖已有应用工程。
+本仓库已完成 M1 可运行工程骨架；登录、积分、捐赠、领取和真实 AI 均待后续开发。
 
-## 当前事实（2026-09-09只读核查）
-- 目标仓库：destiny-huang/campus-cycle-station。
-- 已进入GitHub连接的已授权仓库列表；当前可见性为Public。
-- 远端内容接口明确返回空仓库。本资料尚未由助手提交到远端。
-- 未连接、修改或部署腾讯云服务器，未对SubQuiz执行写入。
-- 本机Git/Codex认证与服务器配置尚待现场核查。查询权限不等于已经验证push。
+## 当前状态（2026-09-09）
+- 技术栈：React + TypeScript + Vite；Node 内置 HTTP API；独立 SQLite 文件。
+- 页面入口：`/student`、`/teacher`、`/locker-wall`。
+- 健康接口：`/api/health`；AI 明确为 `mock` 模式，不调用真实服务。
+- 未连接、修改或部署腾讯云服务器，未对 SubQuiz 执行操作。
 
-## 第一次使用
-1. 在Windows PowerShell中将远端仓库克隆到独立目录，例如 E:\Work-2\campus-cycle-station。
-2. 将本压缩包内容放到仓库根目录，AGENTS.md与README.md应直接位于根目录；不要放在SubQuiz目录下。
-3. 先阅读AGENTS.md，再在该目录启动Codex，执行 prompts/01-preflight.md 的只读检查。
-4. 检查无误后，人工提交这些启动资料并push到main，形成第一个检查点。
-5. 执行 prompts/02-bootstrap.md，只做M1骨架；后续按docs/roadmap.md逐阶段推进。
+## 本地启动
+
+需要 Node.js 22.12.0 或更高版本。新 PowerShell 窗口执行：
+
+```powershell
+Set-Location 'E:\Work-2\campus-cycle-station'
+npm install
+npm run dev
+```
+
+打开 `http://127.0.0.1:5173/student`。同一页面顶部可切换教师端和柜墙；按 API 默认监听 `http://127.0.0.1:3001`。按 `Ctrl+C` 同时停止两个开发服务。
+
+常用检查：
+
+```powershell
+npm run db:check
+npm run typecheck
+npm run build
+```
+
+默认数据库写入 `data/campus-cycle-station.sqlite`，该路径不进入 Git。Node 22 的内置 SQLite API 仍会显示实验性警告；M1 已验证实际读写可用。
 
 ## 文件导航
 - AGENTS.md：执行边界与低上下文工作方式。

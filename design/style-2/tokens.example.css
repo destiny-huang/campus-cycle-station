@@ -1,0 +1,31 @@
+/* 第二套建议变量：合并进现有主题。不是完整组件，不直接全局覆盖所有元素。 */
+:root {
+  --cycle-bg: #fffdf7;
+  --cycle-surface: #ffffff;
+  --cycle-text: #183d35;
+  --cycle-text-muted: #566963;
+  --cycle-primary: #246749;
+  --cycle-primary-hover: #1c523b;
+  --cycle-green-wash: #edf5e5;
+  --cycle-sky-wash: #e9f5f9;
+  --cycle-amber-wash: #fff3d9;
+  --cycle-line: #d8dfd4;
+  --cycle-wood-frame: #b77b3d;
+  --cycle-wood-front: #dba55f;
+  --cycle-wood-light: #f0c98c;
+  --cycle-wood-back: #bd8b52;
+  --cycle-wood-edge: #79512f;
+  --cycle-radius-flat: 0px;
+  --cycle-radius-control: 3px;
+  --cycle-radius-panel: 4px;
+  --cycle-content-max: 1320px;
+  --cycle-space-1: 4px;
+  --cycle-space-2: 8px;
+  --cycle-space-3: 12px;
+  --cycle-space-4: 16px;
+  --cycle-space-6: 24px;
+  --cycle-space-8: 32px;
+}
+/* 彩色点缀不是默认文字色；仅把木材层次用于柜体，不对所有容器加投影。
+   插画中的圆形自然元素不受面板圆角规则限制。
+   跳跃动画实现时需处理prefers-reduced-motion，并让键盘聚焦也能访问详情。 */
