@@ -65,7 +65,7 @@ export default function App() {
         {page === 'teacher' && <TeacherPage session={session} refreshSession={refreshSession} />}
         {page === 'locker-wall' && <LockerWallPage onSelectItem={openItem} />}
       </main>
-      <footer><span>M2 账号与积分账本</span><span>{session?.mode === 'demo' ? '演示环境' : '正式本地环境'} · 捐赠/领取/AI 待开发</span></footer>
+      <footer><span>M3 捐赠、审核与柜位队列</span><span>{session?.mode === 'demo' ? '演示环境' : '正式本地环境'} · 领取/真实 AI 待开发</span></footer>
       {selectedItem && <DemoDialog item={selectedItem} onClose={closeItem} />}
     </div>
   );

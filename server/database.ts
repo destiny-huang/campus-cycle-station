@@ -7,6 +7,7 @@ export type AppMode = 'demo' | 'production';
 export type AppDatabase = { connection: DatabaseSync; path: string; mode: AppMode };
 export type StudentImportRow = { name: string; studentId: string; className: string };
 export type SessionRecord = { role: 'student' | 'teacher'; studentId: number | null };
+export type LockerZone = 'A' | 'B' | 'C';
 
 export type StudentRecord = {
   id: number;
@@ -54,7 +55,7 @@ export function openDatabase(options: { path?: string; mode?: AppMode } = {}): A
       id INTEGER PRIMARY KEY,
       student_id INTEGER NOT NULL REFERENCES students(id),
       amount INTEGER NOT NULL,
-      source TEXT NOT NULL CHECK (source IN ('initial', 'labor')),
+      source TEXT NOT NULL CHECK (source IN ('initial', 'labor', 'donation')),
       reason TEXT NOT NULL,
       idempotency_key TEXT NOT NULL UNIQUE,
       operated_by TEXT NOT NULL,
@@ -69,10 +70,103 @@ export function openDatabase(options: { path?: string; mode?: AppMode } = {}): A
       created_at TEXT NOT NULL
     ) STRICT;
   `);
+  migratePointTransactions(connection);
+  connection.exec(`
+    CREATE TABLE IF NOT EXISTS donations (
+      id INTEGER PRIMARY KEY,
+      student_id INTEGER NOT NULL REFERENCES students(id),
+      name TEXT NOT NULL,
+      category_id TEXT NOT NULL,
+      condition_key TEXT NOT NULL,
+      description TEXT NOT NULL,
+      zone TEXT NOT NULL CHECK (zone IN ('A', 'B', 'C')),
+      slot_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('pending_dropoff', 'pending_review', 'approved', 'returned', 'cancelled', 'returned_removed')),
+      photo_filename TEXT NOT NULL,
+      photo_mime TEXT NOT NULL,
+      photo_size INTEGER NOT NULL,
+      template_version TEXT NOT NULL,
+      base_points INTEGER NOT NULL,
+      condition_multiplier REAL NOT NULL,
+      suggested_points INTEGER NOT NULL,
+      estimate_basis TEXT NOT NULL,
+      final_points INTEGER,
+      return_reason TEXT,
+      idempotency_key TEXT NOT NULL,
+      request_fingerprint TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      deposited_at TEXT,
+      reviewed_at TEXT,
+      cancelled_at TEXT,
+      removed_at TEXT,
+      UNIQUE(student_id, idempotency_key)
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS idx_donations_student ON donations(student_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_donations_status ON donations(status, id DESC);
+    CREATE TABLE IF NOT EXISTS locker_slots (
+      id TEXT PRIMARY KEY,
+      zone TEXT NOT NULL CHECK (zone IN ('A', 'B', 'C')),
+      slot_number INTEGER NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('free', 'reserved', 'occupied')),
+      queue_order INTEGER NOT NULL,
+      donation_id INTEGER UNIQUE REFERENCES donations(id),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(zone, slot_number)
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS idx_locker_fifo ON locker_slots(zone, state, queue_order);
+  `);
+  initializeLockerSlots(connection);
   return { connection, path, mode };
 }
 
-function transaction<T>(database: AppDatabase, work: () => T): T {
+function migratePointTransactions(connection: DatabaseSync) {
+  const row = connection.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'point_transactions'").get() as { sql: string } | undefined;
+  if (!row || row.sql.includes("'donation'")) return;
+  connection.exec(`
+    PRAGMA foreign_keys = OFF;
+    BEGIN IMMEDIATE;
+    CREATE TABLE point_transactions_new (
+      id INTEGER PRIMARY KEY,
+      student_id INTEGER NOT NULL REFERENCES students(id),
+      amount INTEGER NOT NULL,
+      source TEXT NOT NULL CHECK (source IN ('initial', 'labor', 'donation')),
+      reason TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      operated_by TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    ) STRICT;
+    INSERT INTO point_transactions_new SELECT * FROM point_transactions;
+    DROP TABLE point_transactions;
+    ALTER TABLE point_transactions_new RENAME TO point_transactions;
+    CREATE INDEX idx_point_transactions_student ON point_transactions(student_id, id DESC);
+    COMMIT;
+    PRAGMA foreign_keys = ON;
+  `);
+}
+
+function initializeLockerSlots(connection: DatabaseSync) {
+  const totals: Record<LockerZone, number> = { A: 100, B: 50, C: 20 };
+  const now = new Date().toISOString();
+  connection.exec('BEGIN IMMEDIATE;');
+  try {
+    const insert = connection.prepare(`
+      INSERT OR IGNORE INTO locker_slots (id, zone, slot_number, state, queue_order, donation_id, created_at, updated_at)
+      VALUES (?, ?, ?, 'free', ?, NULL, ?, ?)
+    `);
+    for (const zone of Object.keys(totals) as LockerZone[]) {
+      for (let number = 1; number <= totals[zone]; number += 1) {
+        insert.run(`${zone}${String(number).padStart(2, '0')}`, zone, number, number, now, now);
+      }
+    }
+    connection.exec('COMMIT;');
+  } catch (error) {
+    connection.exec('ROLLBACK;');
+    throw error;
+  }
+}
+
+export function withTransaction<T>(database: AppDatabase, work: () => T): T {
   database.connection.exec('BEGIN IMMEDIATE;');
   try {
     const result = work();
@@ -96,7 +190,7 @@ export function writeAndReadDatabaseCheck(database: AppDatabase) {
 
 export function importStudents(database: AppDatabase, rows: StudentImportRow[], initialPoints = 20) {
   if (!Number.isInteger(initialPoints) || initialPoints < 0) throw new Error('invalid initial points');
-  return transaction(database, () => {
+  return withTransaction(database, () => {
     let created = 0;
     let updated = 0;
     const now = new Date().toISOString();
@@ -165,7 +259,7 @@ export function getLedger(database: AppDatabase, studentId: number) {
 }
 
 export function addLaborReward(database: AppDatabase, input: { studentId: number; amount: number; reason: string; idempotencyKey: string }) {
-  return transaction(database, () => {
+  return withTransaction(database, () => {
     const previous = database.connection.prepare(`SELECT student_id, amount, reason FROM point_transactions WHERE idempotency_key = ?`)
       .get(input.idempotencyKey) as { student_id: number; amount: number; reason: string } | undefined;
     if (previous) {

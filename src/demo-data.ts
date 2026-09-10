@@ -1,5 +1,5 @@
 export type ZoneName = 'A' | 'B' | 'C';
-export type SlotStatus = 'empty' | 'reserved' | 'review' | 'available' | 'disabled';
+export type SlotStatus = 'empty' | 'reserved' | 'review' | 'available' | 'returned' | 'disabled';
 
 export type DemoItem = {
   id: string;
@@ -8,9 +8,11 @@ export type DemoItem = {
   points: number;
   category: string;
   icon: 'book' | 'lamp' | 'ball' | 'bag';
-  status: Extract<SlotStatus, 'review' | 'available'>;
+  status: SlotStatus;
   condition: string;
   note: string;
+  photoUrl?: string;
+  isReal?: boolean;
 };
 
 export const ZONE_CONFIGS = {

@@ -7,6 +7,10 @@ import {
   addLaborReward, createSession, deleteSession, findStudentForLogin, getLedger, getSession,
   getStudent, importStudents, searchStudents, type AppDatabase, type SessionRecord,
 } from './database.js';
+import {
+  cancelDonation, confirmReturnedRemoved, createDonation, DonationError, getDonation, listLockers,
+  listStudentDonations, listTeacherDonations, markDeposited, resolvePhotoPath, reviewDonation,
+} from './donations.js';
 
 const COOKIE_NAME = 'cycle_session';
 const contentTypes: Record<string, string> = {
@@ -47,7 +51,7 @@ async function readJson(request: IncomingMessage): Promise<JsonObject> {
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > 1024 * 1024) throw new HttpError(413, 'body_too_large', '请求内容过大');
+    if (size > 5 * 1024 * 1024) throw new HttpError(413, 'body_too_large', '请求内容过大');
     chunks.push(buffer);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) as JsonObject; }
@@ -79,7 +83,14 @@ function serveFrontend(pathname: string, response: ServerResponse) {
   createReadStream(file).pipe(response);
 }
 
-export function createAppServer(database: AppDatabase, options: { teacherPassword?: string } = {}) {
+function donationHttpError(error: unknown) {
+  if (!(error instanceof DonationError)) return error;
+  const status = error.code === 'not_found' ? 404 : error.code === 'forbidden' ? 403
+    : ['zone_full', 'slot_conflict', 'idempotency_conflict', 'invalid_status'].includes(error.code) ? 409 : 400;
+  return new HttpError(status, error.code, error.message);
+}
+
+export function createAppServer(database: AppDatabase, options: { teacherPassword?: string; uploadDirectory?: string } = {}) {
   const teacherPassword = options.teacherPassword ?? process.env.TEACHER_PASSWORD;
 
   return createServer((request, response) => {
@@ -97,6 +108,27 @@ export function createAppServer(database: AppDatabase, options: { teacherPasswor
         const session = getSession(database, readCookie(request));
         const student = session?.role === 'student' && session.studentId ? getStudent(database, session.studentId) : undefined;
         sendJson(response, 200, { authenticated: Boolean(session), role: session?.role ?? null, student: student ?? null, mode: database.mode });
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/lockers') {
+        sendJson(response, 200, { lockers: listLockers(database) });
+        return;
+      }
+
+      const photoMatch = /^\/api\/donations\/(\d+)\/photo$/.exec(url.pathname);
+      if (request.method === 'GET' && photoMatch) {
+        const donation = getDonation(database, Number(photoMatch[1]));
+        if (!donation) throw new HttpError(404, 'not_found', '照片不存在');
+        const session = getSession(database, readCookie(request));
+        const canView = donation.status === 'approved' || session?.role === 'teacher'
+          || (session?.role === 'student' && session.studentId === donation.studentId);
+        if (!canView) throw new HttpError(403, 'forbidden', '无权查看该照片');
+        const path = resolvePhotoPath(database, donation.photoFilename, options.uploadDirectory);
+        if (!existsSync(path)) throw new HttpError(404, 'photo_missing', '照片文件不存在');
+        response.writeHead(200, { 'Content-Type': donation.photoMime, 'Content-Length': String(statSync(path).size),
+          'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff' });
+        createReadStream(path).pipe(response);
         return;
       }
 
@@ -138,11 +170,75 @@ export function createAppServer(database: AppDatabase, options: { teacherPasswor
         return;
       }
 
+      if (request.method === 'GET' && url.pathname === '/api/student/donations') {
+        const session = requireSession(database, request, 'student');
+        sendJson(response, 200, { donations: listStudentDonations(database, session.studentId!) });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/student/donations') {
+        const session = requireSession(database, request, 'student');
+        const body = await readJson(request);
+        const name = String(body.name ?? '').trim();
+        const categoryId = String(body.categoryId ?? '').trim();
+        const condition = String(body.condition ?? '').trim();
+        const description = String(body.description ?? '').trim();
+        const zone = String(body.zone ?? '').trim() as 'A' | 'B' | 'C';
+        const photoDataUrl = String(body.photoDataUrl ?? '');
+        const idempotencyKey = String(body.idempotencyKey ?? '').trim();
+        if (name.length < 1 || name.length > 100 || description.length > 500) throw new HttpError(400, 'invalid_donation', '名称为 1–100 字，说明最多 500 字');
+        if (!['A', 'B', 'C'].includes(zone) || idempotencyKey.length < 16 || idempotencyKey.length > 128) throw new HttpError(400, 'invalid_donation', '尺寸区或请求标识无效');
+        try { sendJson(response, 201, { ok: true, ...createDonation(database, { studentId: session.studentId!, name, categoryId, condition, description, zone, photoDataUrl, idempotencyKey, uploadDirectory: options.uploadDirectory }) }); }
+        catch (error) { throw donationHttpError(error); }
+        return;
+      }
+
+      const studentAction = /^\/api\/student\/donations\/(\d+)\/(deposit|cancel)$/.exec(url.pathname);
+      if (request.method === 'POST' && studentAction) {
+        const session = requireSession(database, request, 'student');
+        try {
+          const result = studentAction[2] === 'deposit'
+            ? markDeposited(database, Number(studentAction[1]), session.studentId!)
+            : cancelDonation(database, Number(studentAction[1]), session.studentId!);
+          sendJson(response, 200, { ok: true, ...result });
+        } catch (error) { throw donationHttpError(error); }
+        return;
+      }
+
       if (request.method === 'GET' && url.pathname === '/api/teacher/students') {
         requireSession(database, request, 'teacher');
         const query = (url.searchParams.get('query') ?? '').trim();
         if (query.length > 80) throw new HttpError(400, 'invalid_query', '搜索内容过长');
         sendJson(response, 200, { students: searchStudents(database, query) });
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/teacher/donations') {
+        requireSession(database, request, 'teacher');
+        sendJson(response, 200, { donations: listTeacherDonations(database, url.searchParams.get('status') ?? undefined) });
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/teacher/lockers') {
+        requireSession(database, request, 'teacher');
+        sendJson(response, 200, { lockers: listLockers(database, true) });
+        return;
+      }
+
+      const teacherAction = /^\/api\/teacher\/donations\/(\d+)\/(review|release)$/.exec(url.pathname);
+      if (request.method === 'POST' && teacherAction) {
+        requireSession(database, request, 'teacher');
+        const body = await readJson(request);
+        const action = String(body.action ?? '');
+        if (teacherAction[2] === 'review' && !['approve', 'return'].includes(action)) throw new HttpError(400, 'invalid_action', '审核操作无效');
+        try {
+          const result = teacherAction[2] === 'release'
+            ? confirmReturnedRemoved(database, Number(teacherAction[1]))
+            : reviewDonation(database, Number(teacherAction[1]), {
+              action: action as 'approve' | 'return', finalPoints: Number(body.finalPoints), reason: String(body.reason ?? ''),
+            });
+          sendJson(response, 200, { ok: true, ...result });
+        } catch (error) { throw donationHttpError(error); }
         return;
       }
 

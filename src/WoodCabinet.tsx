@@ -5,6 +5,7 @@ const statusLabels: Record<SlotStatus, string> = {
   reserved: '已预留',
   review: '待审核',
   available: '可领取',
+  returned: '待移出',
   disabled: '停用',
 };
 
@@ -31,9 +32,11 @@ type WoodCabinetProps = {
   onPageChange: (page: number) => void;
   onSelectItem: (item: DemoItem, trigger: HTMLButtonElement) => void;
   className?: string;
+  items?: DemoItem[];
+  statusOverrides?: Partial<Record<string, SlotStatus>>;
 };
 
-export function WoodCabinet({ zone, page, onPageChange, onSelectItem, className = '' }: WoodCabinetProps) {
+export function WoodCabinet({ zone, page, onPageChange, onSelectItem, className = '', items = DEMO_ITEMS, statusOverrides = SLOT_OVERRIDES }: WoodCabinetProps) {
   const config = ZONE_CONFIGS[zone];
   const pageCount = Math.ceil(config.total / config.perPage);
   const start = page * config.perPage + 1;
@@ -41,8 +44,8 @@ export function WoodCabinet({ zone, page, onPageChange, onSelectItem, className 
     const number = start + index;
     if (number > config.total) return null;
     const id = slotId(zone, number);
-    const item = DEMO_ITEMS.find((candidate) => candidate.slot === id);
-    const status = item?.status ?? SLOT_OVERRIDES[id] ?? 'empty';
+    const item = items.find((candidate) => candidate.slot === id);
+    const status = item?.status ?? statusOverrides[id] ?? 'empty';
     return { id, item, status };
   });
   const last = Math.min(start + config.perPage - 1, config.total);

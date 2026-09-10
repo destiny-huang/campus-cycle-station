@@ -1,11 +1,12 @@
 # 校园循环站 / Campus Cycle Station
 
-本仓库已完成 M2：可运行工程骨架、学生/教师登录、学生名单导入和积分账本。捐赠、领取、真实库存和真实 AI 仍待后续开发。
+本仓库已完成 M3：在 M2 账号与积分账本基础上，接通单件照片捐赠、自动柜位队列、投放、教师审核和上架。领取与真实 AI 仍待后续开发。
 
 ## 当前状态（2026-09-10）
 - 技术栈：React + TypeScript + Vite；Node 内置 HTTP API；独立 SQLite 文件。
 - 页面入口：`/student`、`/teacher`、`/locker-wall`。
 - 学生使用已导入名单中的姓名＋学号登录；教师可导入 CSV、搜索学生和发放劳动奖励。
+- 学生可提交一件真实照片物品并获得 A/B/C 区自动柜位；教师核实实物后改分审核，积分才会到账。
 - 健康接口：`/api/health`；AI 明确为 `mock` 模式，不调用真实服务。
 - 未连接、修改或部署腾讯云服务器，未对 SubQuiz 执行操作。
 
@@ -32,16 +33,19 @@ npm run dev
 
 演示账号为 `演示同学01` / `DEMO001` 至 `演示同学06` / `DEMO006`，每人首次初始化总额为 200 分。普通 CSV 新学生首次初始化为 20 分；重复导入、登录和重启不会重复发放。教师 CSV 表头为 `name,student_id,class_name`。
 
+体验捐赠：学生登录后进入“捐赠物品”，每次上传一件 JPEG、PNG 或 WebP 原图（最大 3MB），填写信息并选择尺寸区。系统按该区 FIFO 分配柜位；学生放入后点击“我已投放”，再由教师端核实、调整整数积分并审核。建议分来自类别与成色模板，未接真实 AI。已上架物品会出现在真实柜墙，但领取入口要到下一阶段才开放。
+
 常用检查：
 
 ```powershell
 npm run db:check
 npm run m2:check
+npm run m3:check
 npm run typecheck
 npm run build
 ```
 
-数据库按环境隔离写入 `data/production/campus-cycle-station.sqlite` 或 `data/demo/campus-cycle-station.sqlite`，均不进入 Git；确有需要时可用本地环境变量 `CYCLE_DB_PATH` 指定其他路径。Node 22 的内置 SQLite API 仍会显示实验性警告，相关读写已实际验证。
+数据库按环境隔离写入 `data/production/campus-cycle-station.sqlite` 或 `data/demo/campus-cycle-station.sqlite`，照片写入 `uploads/production/` 或 `uploads/demo/`，均不进入 Git。可用本地环境变量 `CYCLE_DB_PATH`、`CYCLE_UPLOAD_DIR` 指定其他路径。Node 22 的内置 SQLite API 仍会显示实验性警告，相关读写已实际验证。
 
 ## 文件导航
 - AGENTS.md：执行边界与低上下文工作方式。
