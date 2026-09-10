@@ -12,6 +12,7 @@
     "m2:check": "tsx server/m2-check.ts",
     "m3:check": "tsx server/m3-check.ts",
     "m4:check": "tsx server/m4-check.ts",
+    "m45:check": "tsx server/m45-check.ts",
     "typecheck": "tsc -b --pretty false",
     "build": "npm run typecheck && vite build && tsc -p tsconfig.server.json",
     "start": "node dist-server/index.js"

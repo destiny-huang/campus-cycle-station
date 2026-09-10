@@ -1,5 +1,8 @@
 export type Role = 'student' | 'teacher';
-export type Student = { id: number; studentId: string; name: string; className: string; balance: number; environment: 'demo' | 'production' };
+export type Student = {
+  id: number; studentId: string; name: string; className: string; balance: number;
+  environment: 'demo' | 'production'; onboardingCompletedAt: string | null;
+};
 export type LedgerEntry = { id: number; amount: number; source: 'initial' | 'labor' | 'donation' | 'redemption'; reason: string; operatedBy: string; createdAt: string };
 export type Session = { authenticated: boolean; role: Role | null; student: Student | null; mode: 'demo' | 'production' };
 export type DonationStatus = 'pending_dropoff' | 'pending_review' | 'approved' | 'returned' | 'cancelled' | 'returned_removed' | 'redeemed';

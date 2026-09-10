@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, postJson, type Donation, type LockerIssue, type LockerSlot, type Redemption, type Session, type Student } from './api';
 
-export function TeacherPage({ session, refreshSession }: { session: Session | null; refreshSession: () => Promise<Session> }) {
+export function TeacherPage({ session, refreshSession, onLoggedOut }: {
+  session: Session | null; refreshSession: () => Promise<Session>; onLoggedOut: () => void;
+}) {
   const [password, setPassword] = useState('');
   const [query, setQuery] = useState('');
   const [students, setStudents] = useState<Student[]>([]);
@@ -56,7 +58,7 @@ export function TeacherPage({ session, refreshSession }: { session: Session | nu
 
   async function logout() {
     setBusy(true);
-    try { await postJson('/api/auth/logout', {}); await refreshSession(); setMessage('已退出教师端'); }
+    try { await postJson('/api/auth/logout', {}); await refreshSession(); onLoggedOut(); }
     catch (error) { setMessage((error as Error).message); }
     finally { setBusy(false); }
   }
@@ -123,6 +125,18 @@ export function TeacherPage({ session, refreshSession }: { session: Session | nu
     finally { setBusy(false); }
   }
 
+  async function resetOnboarding() {
+    if (!selected) return;
+    setBusy(true); setMessage('');
+    try {
+      const result = await postJson<{ student: Student }>(`/api/teacher/students/${selected.id}/onboarding/reset`, {});
+      setSelected(result.student);
+      setStudents((current) => current.map((student) => student.id === result.student.id ? result.student : student));
+      setMessage(`已重置 ${result.student.name} 的新手教程；积分及业务记录未改变。`);
+    } catch (error) { setMessage((error as Error).message); }
+    finally { setBusy(false); }
+  }
+
   const pending = donations.filter((donation) => donation.status === 'pending_review' || donation.status === 'returned');
   const occupied = lockers.filter((slot) => slot.donation);
   const freeCounts = (['A', 'B', 'C'] as const).map((zone) => ({ zone, count: lockers.filter((slot) => slot.zone === zone && slot.state === 'free').length }));
@@ -146,12 +160,25 @@ export function TeacherPage({ session, refreshSession }: { session: Session | nu
       </section>
 
       <div className="m2-workspace">
-        <section className="student-admin"><header className="section-heading"><div><p className="section-kicker">真实数据库</p><h2>搜索学生与劳动加分</h2></div><span>显示姓名、班级、学号和余额</span></header><label className="search-field">姓名或学号<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="输入姓名或学号；留空显示全部" /></label><div className="real-student-list">{students.map((student) => <button className={selected?.id === student.id ? 'active' : ''} type="button" key={student.id} onClick={() => { setSelected(student); setRewardKey(crypto.randomUUID()); setMessage(''); }}><span><strong>{student.name}</strong><small>{student.className} · {student.studentId}</small></span><b>{student.balance} 分</b></button>)}{students.length === 0 && <p>暂无匹配学生。可先导入 CSV 名单。</p>}</div>{selected && <form className="reward-form" onSubmit={reward}><p>为 <strong>{selected.name}</strong> 发放劳动奖励</p><label>整数积分<input type="number" min="1" max="10000" step="1" value={amount} onChange={(event) => setAmount(event.target.value)} required /></label><label>原因<input value={reason} onChange={(event) => setReason(event.target.value)} minLength={2} maxLength={200} required placeholder="例如：整理循环站物品" /></label><button className="real-action" type="submit" disabled={busy}>确认发放</button><small>失败重试沿用同一请求标识；成功后新奖励使用新标识。</small></form>}</section>
+        <section className="student-admin">
+          <header className="section-heading"><div><p className="section-kicker">真实数据库</p><h2>搜索学生与劳动加分</h2></div><span>显示身份、余额和教程状态</span></header>
+          <label className="search-field">姓名或学号<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="输入姓名或学号；留空显示全部" /></label>
+          <div className="real-student-list">{students.map((student) => <button className={selected?.id === student.id ? 'active' : ''} type="button" key={student.id} onClick={() => { setSelected(student); setRewardKey(crypto.randomUUID()); setMessage(''); }}><span><strong>{student.name}</strong><small>{student.className} · {student.studentId}</small></span><b>{student.balance} 分<small>教程：{student.onboardingCompletedAt ? '已完成' : '未完成'}</small></b></button>)}{students.length === 0 && <p>暂无匹配学生。可先导入 CSV 名单。</p>}</div>
+          {selected && <form className="reward-form" onSubmit={reward}><p>为 <strong>{selected.name}</strong> 发放劳动奖励</p><label>整数积分<input type="number" min="1" max="10000" step="1" value={amount} onChange={(event) => setAmount(event.target.value)} required /></label><label>原因<input value={reason} onChange={(event) => setReason(event.target.value)} minLength={2} maxLength={200} required placeholder="例如：整理循环站物品" /></label><button className="real-action" type="submit" disabled={busy}>确认发放</button><small>失败重试沿用同一请求标识；成功后新奖励使用新标识。</small></form>}
+        </section>
 
         <aside className="teacher-side m2-side"><form className="csv-import" onSubmit={importCsv}><p className="section-kicker">真实操作 · 幂等导入</p><h2>导入学生名单</h2><p>CSV 表头：name, student_id, class_name。普通新学生首次获得 20 分；重复导入不重置余额。</p><label className="file-picker">选择 CSV<input type="file" accept=".csv,text/csv" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setCsv(await file.text()); setCsvName(file.name); }} /></label><small>{csvName || '尚未选择文件'}</small><button className="real-action" type="submit" disabled={busy || !csv}>导入名单</button></form>
           <section className="live-lockers"><p className="section-kicker">真实柜位概览</p><h2>当前存放内容</h2><div className="free-counts">{freeCounts.map(({ zone, count }) => <span key={zone}><b>{zone}</b>{count} 空闲</span>)}</div><div className="locker-content-list">{occupied.map((slot) => <div key={slot.id}><b>{slot.id}</b><span>{slot.donation?.name}<small>{slot.donation?.donorName ? `${slot.donation.donorName} · ` : ''}{slot.donation?.status}</small></span></div>)}{occupied.length === 0 && <p>当前柜位均为空闲。</p>}</div></section>
         </aside>
       </div>
+      {selected && <section className="onboarding-admin">
+        <div><p className="section-kicker">当前搜索选中学生</p><h2>{selected.name} · 新手教程</h2><p>{selected.className} · {selected.studentId} · 当前余额 {selected.balance} 分</p></div>
+        <strong className={selected.onboardingCompletedAt ? 'tutorial-done' : 'tutorial-pending'}>
+          {selected.onboardingCompletedAt ? '已完成' : '未完成'}
+        </strong>
+        <button type="button" disabled={busy || selected.onboardingCompletedAt === null} onClick={resetOnboarding}>重置新手教程</button>
+        <small>只重置教程状态，不改变积分、流水、捐赠、领取或柜位。</small>
+      </section>}
       <section className="m4-admin-section">
         <header className="section-heading"><div><p className="section-kicker">M4 · 领取闭环</p><h2>最近领取与柜位异常</h2></div><span>异常仅人工处理，不自动退款或调分</span></header>
         <div className="m4-admin-grid">

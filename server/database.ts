@@ -16,6 +16,7 @@ export type StudentRecord = {
   className: string;
   balance: number;
   environment: AppMode;
+  onboardingCompletedAt: string | null;
 };
 
 function readMode(value = process.env.CYCLE_MODE): AppMode {
@@ -70,6 +71,7 @@ export function openDatabase(options: { path?: string; mode?: AppMode } = {}): A
       created_at TEXT NOT NULL
     ) STRICT;
   `);
+  migrateStudentOnboarding(connection);
   migratePointTransactions(connection);
   connection.exec(`
     CREATE TABLE IF NOT EXISTS donations (
@@ -149,6 +151,13 @@ export function openDatabase(options: { path?: string; mode?: AppMode } = {}): A
   `);
   initializeLockerSlots(connection);
   return { connection, path, mode };
+}
+
+function migrateStudentOnboarding(connection: DatabaseSync) {
+  const columns = connection.prepare('PRAGMA table_info(students)').all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === 'onboarding_completed_at')) {
+    connection.exec('ALTER TABLE students ADD COLUMN onboarding_completed_at TEXT;');
+  }
 }
 
 function migratePointTransactions(connection: DatabaseSync) {
@@ -303,6 +312,7 @@ function mapStudent(row: Record<string, unknown>): StudentRecord {
   return {
     id: Number(row.id), studentId: String(row.student_number), name: String(row.name),
     className: String(row.class_name), balance: Number(row.balance), environment: row.environment as AppMode,
+    onboardingCompletedAt: row.onboarding_completed_at === null ? null : String(row.onboarding_completed_at),
   };
 }
 
@@ -325,6 +335,24 @@ export function searchStudents(database: AppDatabase, query: string) {
     ORDER BY name, student_number LIMIT 50
   `).all(database.mode, pattern, pattern) as Record<string, unknown>[];
   return rows.map(mapStudent);
+}
+
+export function completeStudentOnboarding(database: AppDatabase, studentId: number) {
+  const student = getStudent(database, studentId);
+  if (!student) throw new Error('student not found');
+  if (student.onboardingCompletedAt === null) {
+    database.connection.prepare('UPDATE students SET onboarding_completed_at = ?, updated_at = ? WHERE id = ? AND onboarding_completed_at IS NULL')
+      .run(new Date().toISOString(), new Date().toISOString(), studentId);
+  }
+  return getStudent(database, studentId)!;
+}
+
+export function resetStudentOnboarding(database: AppDatabase, studentId: number) {
+  const student = getStudent(database, studentId);
+  if (!student) throw new Error('student not found');
+  database.connection.prepare('UPDATE students SET onboarding_completed_at = NULL, updated_at = ? WHERE id = ?')
+    .run(new Date().toISOString(), studentId);
+  return getStudent(database, studentId)!;
 }
 
 export function getLedger(database: AppDatabase, studentId: number) {

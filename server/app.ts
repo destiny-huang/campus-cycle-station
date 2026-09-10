@@ -4,8 +4,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { extname, join, resolve } from 'node:path';
 import { parseStudentCsv } from './csv.js';
 import {
-  addLaborReward, createSession, deleteSession, findStudentForLogin, getLedger, getSession,
-  getStudent, importStudents, searchStudents, type AppDatabase, type SessionRecord,
+  addLaborReward, completeStudentOnboarding, createSession, deleteSession, findStudentForLogin, getLedger, getSession,
+  getStudent, importStudents, resetStudentOnboarding, searchStudents, type AppDatabase, type SessionRecord,
 } from './database.js';
 import {
   cancelDonation, confirmReturnedRemoved, createDonation, DonationError, getDonation, listLockers,
@@ -159,7 +159,8 @@ export function createAppServer(database: AppDatabase, options: { teacherPasswor
         if (!student) throw new HttpError(401, 'invalid_credentials', '姓名与学号不匹配');
         deleteSession(database, readCookie(request));
         const token = createSession(database, 'student', student.id);
-        sendJson(response, 200, { ok: true, role: 'student', student }, { 'Set-Cookie': sessionCookie(token) });
+        sendJson(response, 200, { ok: true, role: 'student', student,
+          onboardingRequired: student.onboardingCompletedAt === null }, { 'Set-Cookie': sessionCookie(token) });
         return;
       }
 
@@ -185,6 +186,12 @@ export function createAppServer(database: AppDatabase, options: { teacherPasswor
         const student = getStudent(database, session.studentId!);
         if (!student) throw new HttpError(404, 'student_not_found', '学生不存在');
         sendJson(response, 200, { student, ledger: getLedger(database, student.id) });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/student/onboarding/complete') {
+        const session = requireSession(database, request, 'student');
+        sendJson(response, 200, { ok: true, student: completeStudentOnboarding(database, session.studentId!) });
         return;
       }
 
@@ -258,6 +265,18 @@ export function createAppServer(database: AppDatabase, options: { teacherPasswor
         const query = (url.searchParams.get('query') ?? '').trim();
         if (query.length > 80) throw new HttpError(400, 'invalid_query', '搜索内容过长');
         sendJson(response, 200, { students: searchStudents(database, query) });
+        return;
+      }
+
+      const resetOnboardingMatch = /^\/api\/teacher\/students\/(\d+)\/onboarding\/reset$/.exec(url.pathname);
+      if (request.method === 'POST' && resetOnboardingMatch) {
+        requireSession(database, request, 'teacher');
+        try {
+          sendJson(response, 200, { ok: true, student: resetStudentOnboarding(database, Number(resetOnboardingMatch[1])) });
+        } catch (error) {
+          if ((error as Error).message === 'student not found') throw new HttpError(404, 'student_not_found', '学生不存在');
+          throw error;
+        }
         return;
       }
 

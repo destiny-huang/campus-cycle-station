@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { api, postJson, type Donation, type LedgerEntry, type Redemption, type Session, type Student } from './api';
 import { DEMO_ITEMS, type DemoItem } from './demo-data';
+import { OnboardingTutorial } from './OnboardingTutorial';
 
 const itemIcons = { book: '📚', lamp: '💡', ball: '🏀', bag: '🎒' };
 const categories = [
@@ -24,10 +25,11 @@ function readPhoto(file: File) {
   });
 }
 
-export function StudentPage({ session, refreshSession, onSelectItem }: {
+export function StudentPage({ session, refreshSession, onSelectItem, onLoggedOut }: {
   session: Session | null;
   refreshSession: () => Promise<Session>;
   onSelectItem: (item: DemoItem, trigger: HTMLButtonElement) => void;
+  onLoggedOut: () => void;
 }) {
   const [name, setName] = useState('');
   const [studentId, setStudentId] = useState('');
@@ -39,6 +41,7 @@ export function StudentPage({ session, refreshSession, onSelectItem }: {
   const [issueKey, setIssueKey] = useState(() => crypto.randomUUID());
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
   const [category, setCategory] = useState('全部');
   const [itemName, setItemName] = useState('');
   const [categoryId, setCategoryId] = useState('book');
@@ -63,6 +66,7 @@ export function StudentPage({ session, refreshSession, onSelectItem }: {
 
   useEffect(() => {
     if (session?.role !== 'student') { setProfile(null); setDonations([]); setRedemptions([]); return; }
+    if (session.student?.onboardingCompletedAt === null) setShowTutorial(true);
     void loadStudentData().catch((error: Error) => setMessage(error.message));
   }, [session]);
 
@@ -75,7 +79,7 @@ export function StudentPage({ session, refreshSession, onSelectItem }: {
 
   async function logout() {
     setBusy(true);
-    try { await postJson('/api/auth/logout', {}); await refreshSession(); setProfile(null); setDonations([]); setMessage('已退出登录'); }
+    try { await postJson('/api/auth/logout', {}); await refreshSession(); setProfile(null); setDonations([]); setShowTutorial(false); onLoggedOut(); }
     catch (error) { setMessage((error as Error).message); }
     finally { setBusy(false); }
   }
@@ -131,6 +135,12 @@ export function StudentPage({ session, refreshSession, onSelectItem }: {
     finally { setBusy(false); }
   }
 
+  async function finishTutorial() {
+    await postJson('/api/student/onboarding/complete', {});
+    await refreshSession();
+    setShowTutorial(false);
+  }
+
   const student = profile?.student ?? (session?.role === 'student' ? session.student : null);
 
   return (
@@ -151,6 +161,7 @@ export function StudentPage({ session, refreshSession, onSelectItem }: {
         <button type="button" onClick={() => setMessage('请到柜位展示中查看并领取已上架的真实物品。')}><span className="action-icon">寻</span><span><strong>浏览物品</strong><small>已上架物品可领取</small></span><b>→</b></button>
         <button type="button" onClick={() => student ? donationRef.current?.scrollIntoView({ behavior: 'smooth' }) : setMessage('请先登录后查看记录。')}><span className="action-icon">记</span><span><strong>捐赠记录</strong><small>{student ? `${donations.length} 条真实记录` : '登录后查看'}</small></span><b>→</b></button>
       </section>
+      {student && <div className="student-help-row"><button type="button" onClick={() => setShowTutorial(true)}>？ 使用帮助 / 新手教程</button></div>}
 
       {student && <section className="donation-workspace" ref={donationRef}>
         <header className="section-heading"><div><p className="section-kicker">M3 · 一次提交一件</p><h2>捐赠物品并自动分柜</h2></div><span>实际柜体尺寸尚未测量，请自行确认所选区域能放下物品</span></header>
@@ -185,6 +196,7 @@ export function StudentPage({ session, refreshSession, onSelectItem }: {
         </div>
         <p>异常反馈交由教师人工处理，不会自动退款或调分。</p>
       </section>}
+      {student && showTutorial && <OnboardingTutorial onComplete={finishTutorial} onSkip={finishTutorial} />}
     </div>
   );
 }

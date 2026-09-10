@@ -1,20 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, type Session } from './api';
 import { DemoDialog } from './DemoDialog';
+import { HomePage } from './HomePage';
 import { LockerWallPage } from './LockerWallPage';
 import { StudentPage } from './StudentPage';
 import { TeacherPage } from './TeacherPage';
 import type { DemoItem } from './demo-data';
 
-type PageKey = 'student' | 'teacher' | 'locker-wall';
+type PageKey = 'home' | 'student' | 'teacher' | 'locker-wall';
 type HealthState = 'loading' | 'ready' | 'error';
-const routes: Record<PageKey, { path: string; label: string }> = {
+const routes: Record<Exclude<PageKey, 'home'>, { path: string; label: string }> = {
   student: { path: '/student', label: '学生端' }, teacher: { path: '/teacher', label: '教师端' },
   'locker-wall': { path: '/locker-wall', label: '柜位展示' },
 };
 
 function pageFromPath(pathname: string): PageKey {
-  return (Object.entries(routes) as [PageKey, (typeof routes)[PageKey]][]).find(([, route]) => route.path === pathname)?.[0] ?? 'student';
+  if (pathname === '/') return 'home';
+  return (Object.entries(routes) as [Exclude<PageKey, 'home'>, { path: string; label: string }][])
+    .find(([, route]) => route.path === pathname)?.[0] ?? 'home';
 }
 
 function HealthBadge({ health }: { health: HealthState }) {
@@ -49,20 +52,21 @@ export default function App() {
     return () => controller.abort();
   }, []);
 
-  function navigate(next: PageKey) { window.history.pushState({}, '', routes[next].path); setPage(next); }
+  function navigate(next: PageKey) { window.history.pushState({}, '', next === 'home' ? '/' : routes[next].path); setPage(next); }
   function openItem(item: DemoItem, trigger: HTMLButtonElement) { lastTrigger.current = trigger; setSelectedItem(item); }
   function closeItem() { setSelectedItem(null); window.setTimeout(() => lastTrigger.current?.focus(), 0); }
 
   return (
     <div className="app-shell">
       <header className="topbar">
-        <button className="brand" type="button" onClick={() => navigate('student')}><span className="brand-mark">循</span><span><strong>校园循环站</strong><small>Campus Cycle Station</small></span></button>
-        <nav aria-label="页面入口">{(Object.keys(routes) as PageKey[]).map((key) => <button className={page === key ? 'active' : ''} key={key} type="button" onClick={() => navigate(key)}>{routes[key].label}</button>)}</nav>
+        <button className="brand" type="button" onClick={() => navigate('home')}><span className="brand-mark">循</span><span><strong>校园循环站</strong><small>Campus Cycle Station</small></span></button>
+        <nav aria-label="页面入口">{(Object.keys(routes) as Exclude<PageKey, 'home'>[]).map((key) => <button className={page === key ? 'active' : ''} key={key} type="button" onClick={() => navigate(key)}>{routes[key].label}</button>)}</nav>
         <HealthBadge health={health} />
       </header>
       <main>
-        {page === 'student' && <StudentPage session={session} refreshSession={refreshSession} onSelectItem={openItem} />}
-        {page === 'teacher' && <TeacherPage session={session} refreshSession={refreshSession} />}
+        {page === 'home' && <HomePage session={session} refreshSession={refreshSession} navigate={navigate} />}
+        {page === 'student' && <StudentPage session={session} refreshSession={refreshSession} onSelectItem={openItem} onLoggedOut={() => navigate('home')} />}
+        {page === 'teacher' && <TeacherPage session={session} refreshSession={refreshSession} onLoggedOut={() => navigate('home')} />}
         {page === 'locker-wall' && <LockerWallPage onSelectItem={openItem} />}
       </main>
       <footer><span>M4 捐赠、领取与柜位闭环</span><span>{session?.mode === 'demo' ? '演示环境' : '正式本地环境'} · 真实 AI 待开发</span></footer>
