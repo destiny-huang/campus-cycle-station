@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
-import { api, postJson, type Donation, type LedgerEntry, type Session, type Student } from './api';
+import { api, postJson, type Donation, type LedgerEntry, type Redemption, type Session, type Student } from './api';
 import { DEMO_ITEMS, type DemoItem } from './demo-data';
 
 const itemIcons = { book: '📚', lamp: '💡', ball: '🏀', bag: '🎒' };
@@ -11,7 +11,7 @@ const categories = [
 const conditions = [['near_new', '近新'], ['normal', '正常使用痕迹'], ['worn_but_complete', '磨损但完整']] as const;
 const statusLabels: Record<Donation['status'], string> = {
   pending_dropoff: '待投放', pending_review: '已投放 · 待审核', approved: '审核通过 · 已上架',
-  returned: '已退回 · 待取出', cancelled: '已取消', returned_removed: '已退回并移出',
+  returned: '已退回 · 待取出', cancelled: '已取消', returned_removed: '已退回并移出', redeemed: '已领取',
 };
 type Profile = { student: Student; ledger: LedgerEntry[] };
 
@@ -33,6 +33,10 @@ export function StudentPage({ session, refreshSession, onSelectItem }: {
   const [studentId, setStudentId] = useState('');
   const [profile, setProfile] = useState<Profile | null>(null);
   const [donations, setDonations] = useState<Donation[]>([]);
+  const [redemptions, setRedemptions] = useState<Redemption[]>([]);
+  const [issueFor, setIssueFor] = useState<number | null>(null);
+  const [issueText, setIssueText] = useState('');
+  const [issueKey, setIssueKey] = useState(() => crypto.randomUUID());
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [category, setCategory] = useState('全部');
@@ -50,14 +54,15 @@ export function StudentPage({ session, refreshSession, onSelectItem }: {
   const items = category === '全部' ? DEMO_ITEMS : DEMO_ITEMS.filter((item) => item.category === category);
 
   async function loadStudentData() {
-    const [account, records] = await Promise.all([
+    const [account, records, claims] = await Promise.all([
       api<Profile>('/api/student/me'), api<{ donations: Donation[] }>('/api/student/donations'),
+      api<{ redemptions: Redemption[] }>('/api/student/redemptions'),
     ]);
-    setProfile(account); setDonations(records.donations);
+    setProfile(account); setDonations(records.donations); setRedemptions(claims.redemptions);
   }
 
   useEffect(() => {
-    if (session?.role !== 'student') { setProfile(null); setDonations([]); return; }
+    if (session?.role !== 'student') { setProfile(null); setDonations([]); setRedemptions([]); return; }
     void loadStudentData().catch((error: Error) => setMessage(error.message));
   }, [session]);
 
@@ -116,6 +121,16 @@ export function StudentPage({ session, refreshSession, onSelectItem }: {
     finally { setBusy(false); }
   }
 
+  async function reportIssue(redemption: Redemption) {
+    setBusy(true); setMessage('');
+    try {
+      await postJson(`/api/student/redemptions/${redemption.id}/issues`, { description: issueText, idempotencyKey: issueKey });
+      setMessage('柜位异常已记录，教师会人工处理；系统不会自动退款或调分。');
+      setIssueFor(null); setIssueText(''); setIssueKey(crypto.randomUUID());
+    } catch (error) { setMessage((error as Error).message); }
+    finally { setBusy(false); }
+  }
+
   const student = profile?.student ?? (session?.role === 'student' ? session.student : null);
 
   return (
@@ -128,12 +143,12 @@ export function StudentPage({ session, refreshSession, onSelectItem }: {
 
       {session?.role === 'teacher' ? <section className="auth-panel compact-auth"><p>当前是教师会话，请先退出教师端再登录学生账号。</p><button type="button" onClick={logout} disabled={busy}>退出教师会话</button></section>
         : !student ? <section className="auth-panel"><div><p className="section-kicker">学生登录</p><h2>姓名＋学号</h2><p>姓名必须与同一学号对应；无需学生密码、验证码或激活码。</p></div><form onSubmit={login}><label>姓名<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required /></label><label>学号<input value={studentId} onChange={(event) => setStudentId(event.target.value)} autoComplete="username" required /></label><button className="real-action" type="submit" disabled={busy}>{busy ? '登录中…' : '登录'}</button></form></section>
-        : <section className="account-panel"><header><div><p className="section-kicker">真实数据库余额</p><h2>我的积分流水</h2></div><button type="button" onClick={logout} disabled={busy}>退出登录</button></header><div className="ledger-list">{profile?.ledger.map((entry) => <article key={entry.id}><span className={entry.amount >= 0 ? 'ledger-plus' : 'ledger-minus'}>{entry.amount >= 0 ? '+' : ''}{entry.amount}</span><div><strong>{entry.reason}</strong><small>{entry.source === 'initial' ? '初始积分' : entry.source === 'labor' ? '劳动奖励' : '捐赠审核'} · {new Date(entry.createdAt).toLocaleString('zh-CN')}</small></div></article>)}{profile && profile.ledger.length === 0 && <p>暂无积分流水</p>}{!profile && <p>正在读取积分流水…</p>}</div></section>}
+        : <section className="account-panel"><header><div><p className="section-kicker">真实数据库余额</p><h2>我的积分流水</h2></div><button type="button" onClick={logout} disabled={busy}>退出登录</button></header><div className="ledger-list">{profile?.ledger.map((entry) => <article key={entry.id}><span className={entry.amount >= 0 ? 'ledger-plus' : 'ledger-minus'}>{entry.amount >= 0 ? '+' : ''}{entry.amount}</span><div><strong>{entry.reason}</strong><small>{entry.source === 'initial' ? '初始积分' : entry.source === 'labor' ? '劳动奖励' : entry.source === 'donation' ? '捐赠审核' : '领取扣分'} · {new Date(entry.createdAt).toLocaleString('zh-CN')}</small></div></article>)}{profile && profile.ledger.length === 0 && <p>暂无积分流水</p>}{!profile && <p>正在读取积分流水…</p>}</div></section>}
       {message && <p className="inline-notice" role="status">{message}</p>}
 
       <section className="student-actions" aria-label="学生入口">
         <button type="button" onClick={() => student ? donationRef.current?.scrollIntoView({ behavior: 'smooth' }) : setMessage('请先登录后捐赠。')}><span className="action-icon">捐</span><span><strong>捐赠物品</strong><small>{student ? '单件申请与自动分柜' : '登录后使用'}</small></span><b>→</b></button>
-        <button type="button" onClick={() => setMessage('已上架物品可在柜位展示中查看；领取下一阶段开放。')}><span className="action-icon">寻</span><span><strong>浏览物品</strong><small>领取下一阶段开放</small></span><b>→</b></button>
+        <button type="button" onClick={() => setMessage('请到柜位展示中查看并领取已上架的真实物品。')}><span className="action-icon">寻</span><span><strong>浏览物品</strong><small>已上架物品可领取</small></span><b>→</b></button>
         <button type="button" onClick={() => student ? donationRef.current?.scrollIntoView({ behavior: 'smooth' }) : setMessage('请先登录后查看记录。')}><span className="action-icon">记</span><span><strong>捐赠记录</strong><small>{student ? `${donations.length} 条真实记录` : '登录后查看'}</small></span><b>→</b></button>
       </section>
 
@@ -152,11 +167,24 @@ export function StudentPage({ session, refreshSession, onSelectItem }: {
               <button className="real-action wide-field" type="submit" disabled={busy}>{busy ? '提交中…' : '提交单件申请并分配柜位'}</button>
             </>}
           </form>
-          <div className="donation-records"><h3>我的捐赠记录</h3>{donations.map((donation) => <article key={donation.id} className={`donation-record status-${donation.status}`}><img src={donation.photoUrl} alt={`${donation.name}原图`} /><div><strong>{donation.name}</strong><small>{donation.slotId} · {statusLabels[donation.status]}</small><p>规则建议 {donation.suggestedPoints} 分{donation.finalPoints === null ? '' : ` · 最终 ${donation.finalPoints} 分`}</p>{donation.returnReason && <p>退回原因：{donation.returnReason}</p>}<div className="record-actions">{donation.status === 'pending_dropoff' && <><button type="button" onClick={() => updateDonation(donation, 'deposit')} disabled={busy}>我已投放</button><button type="button" onClick={() => updateDonation(donation, 'cancel')} disabled={busy}>取消申请</button></>}{donation.status === 'approved' && <span>已上架 · 领取下一阶段开放</span>}{donation.status === 'returned' && <span>请联系教师取出实物</span>}</div></div></article>)}{donations.length === 0 && <p>暂无捐赠记录。</p>}</div>
+          <div className="donation-records"><h3>我的捐赠记录</h3>{donations.map((donation) => <article key={donation.id} className={`donation-record status-${donation.status}`}><img src={donation.photoUrl} alt={`${donation.name}原图`} /><div><strong>{donation.name}</strong><small>{donation.slotId} · {statusLabels[donation.status]}</small><p>规则建议 {donation.suggestedPoints} 分{donation.finalPoints === null ? '' : ` · 最终 ${donation.finalPoints} 分`}</p>{donation.returnReason && <p>退回原因：{donation.returnReason}</p>}<div className="record-actions">{donation.status === 'pending_dropoff' && <><button type="button" onClick={() => updateDonation(donation, 'deposit')} disabled={busy}>我已投放</button><button type="button" onClick={() => updateDonation(donation, 'cancel')} disabled={busy}>取消申请</button></>}{donation.status === 'approved' && <span>已上架 · 可在柜位展示中领取</span>}{donation.status === 'returned' && <span>请联系教师取出实物</span>}</div></div></article>)}{donations.length === 0 && <p>暂无捐赠记录。</p>}</div>
         </div>
       </section>}
 
       <section className="preview-section"><header className="section-heading"><div><p className="section-kicker">独立界面样例 · 不进入真实库存</p><h2>物品预览</h2></div><div className="filter-row">{previewCategories.map((value) => <button className={category === value ? 'active' : ''} type="button" key={value} onClick={() => setCategory(value)}>{value}</button>)}</div></header><div className="item-strip">{items.map((item) => <button className="preview-item" type="button" key={item.id} onClick={(event) => onSelectItem(item, event.currentTarget)}><span className={`preview-art art-${item.icon}`}>{itemIcons[item.icon]}</span><span className="preview-copy"><strong>{item.name}</strong><small>{item.slot} · 示例 {item.points} 分</small></span></button>)}</div></section>
+      {student && <section className="redemption-history">
+        <header className="section-heading"><div><p className="section-kicker">M4 · 真实记录</p><h2>我的领取记录</h2></div><span>保留领取时的积分、照片和柜位</span></header>
+        <div className="redemption-list">
+          {redemptions.map((claim) => <article key={claim.id}>
+            <img src={claim.photoUrl} alt={`${claim.itemName}领取原图`} />
+            <div><strong>{claim.itemName}</strong><small>消耗 {claim.pointsSpent} 分 · 领取时柜位 {claim.slotId}</small><time>{new Date(claim.createdAt).toLocaleString('zh-CN')}</time></div>
+            {issueFor === claim.id ? <div className="issue-form"><textarea value={issueText} onChange={(event) => setIssueText(event.target.value)} maxLength={300} placeholder="例如：柜内没有物品、柜内仍有旧物" /><button className="real-action" type="button" disabled={busy || issueText.trim().length < 2} onClick={() => reportIssue(claim)}>提交异常</button></div>
+              : <button type="button" onClick={() => { setIssueFor(claim.id); setIssueKey(crypto.randomUUID()); }}>柜位异常</button>}
+          </article>)}
+          {redemptions.length === 0 && <p>暂无领取记录；请在柜位展示中领取已上架物品。</p>}
+        </div>
+        <p>异常反馈交由教师人工处理，不会自动退款或调分。</p>
+      </section>}
     </div>
   );
 }

@@ -55,7 +55,7 @@ export function openDatabase(options: { path?: string; mode?: AppMode } = {}): A
       id INTEGER PRIMARY KEY,
       student_id INTEGER NOT NULL REFERENCES students(id),
       amount INTEGER NOT NULL,
-      source TEXT NOT NULL CHECK (source IN ('initial', 'labor', 'donation')),
+      source TEXT NOT NULL CHECK (source IN ('initial', 'labor', 'donation', 'redemption')),
       reason TEXT NOT NULL,
       idempotency_key TEXT NOT NULL UNIQUE,
       operated_by TEXT NOT NULL,
@@ -81,7 +81,7 @@ export function openDatabase(options: { path?: string; mode?: AppMode } = {}): A
       description TEXT NOT NULL,
       zone TEXT NOT NULL CHECK (zone IN ('A', 'B', 'C')),
       slot_id TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('pending_dropoff', 'pending_review', 'approved', 'returned', 'cancelled', 'returned_removed')),
+      status TEXT NOT NULL CHECK (status IN ('pending_dropoff', 'pending_review', 'approved', 'returned', 'cancelled', 'returned_removed', 'redeemed')),
       photo_filename TEXT NOT NULL,
       photo_mime TEXT NOT NULL,
       photo_size INTEGER NOT NULL,
@@ -116,13 +116,44 @@ export function openDatabase(options: { path?: string; mode?: AppMode } = {}): A
     ) STRICT;
     CREATE INDEX IF NOT EXISTS idx_locker_fifo ON locker_slots(zone, state, queue_order);
   `);
+  migrateDonations(connection);
+  connection.exec(`
+    CREATE TABLE IF NOT EXISTS redemptions (
+      id INTEGER PRIMARY KEY,
+      donation_id INTEGER NOT NULL UNIQUE REFERENCES donations(id),
+      student_id INTEGER NOT NULL REFERENCES students(id),
+      points_spent INTEGER NOT NULL CHECK (points_spent > 0),
+      item_name_snapshot TEXT NOT NULL,
+      photo_filename_snapshot TEXT NOT NULL,
+      photo_mime_snapshot TEXT NOT NULL,
+      slot_id_snapshot TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(student_id, idempotency_key)
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS idx_redemptions_student ON redemptions(student_id, id DESC);
+    CREATE TABLE IF NOT EXISTS locker_issues (
+      id INTEGER PRIMARY KEY,
+      redemption_id INTEGER NOT NULL REFERENCES redemptions(id),
+      donation_id INTEGER NOT NULL REFERENCES donations(id),
+      student_id INTEGER NOT NULL REFERENCES students(id),
+      slot_id_snapshot TEXT NOT NULL,
+      description TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('open', 'resolved')),
+      idempotency_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      resolved_at TEXT,
+      UNIQUE(student_id, idempotency_key)
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS idx_locker_issues_status ON locker_issues(status, id DESC);
+  `);
   initializeLockerSlots(connection);
   return { connection, path, mode };
 }
 
 function migratePointTransactions(connection: DatabaseSync) {
   const row = connection.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'point_transactions'").get() as { sql: string } | undefined;
-  if (!row || row.sql.includes("'donation'")) return;
+  if (!row || row.sql.includes("'redemption'")) return;
   connection.exec(`
     PRAGMA foreign_keys = OFF;
     BEGIN IMMEDIATE;
@@ -130,7 +161,7 @@ function migratePointTransactions(connection: DatabaseSync) {
       id INTEGER PRIMARY KEY,
       student_id INTEGER NOT NULL REFERENCES students(id),
       amount INTEGER NOT NULL,
-      source TEXT NOT NULL CHECK (source IN ('initial', 'labor', 'donation')),
+      source TEXT NOT NULL CHECK (source IN ('initial', 'labor', 'donation', 'redemption')),
       reason TEXT NOT NULL,
       idempotency_key TEXT NOT NULL UNIQUE,
       operated_by TEXT NOT NULL,
@@ -140,6 +171,51 @@ function migratePointTransactions(connection: DatabaseSync) {
     DROP TABLE point_transactions;
     ALTER TABLE point_transactions_new RENAME TO point_transactions;
     CREATE INDEX idx_point_transactions_student ON point_transactions(student_id, id DESC);
+    COMMIT;
+    PRAGMA foreign_keys = ON;
+  `);
+}
+
+function migrateDonations(connection: DatabaseSync) {
+  const row = connection.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'donations'").get() as { sql: string } | undefined;
+  if (!row || row.sql.includes("'redeemed'")) return;
+  connection.exec(`
+    PRAGMA foreign_keys = OFF;
+    BEGIN IMMEDIATE;
+    CREATE TABLE donations_new (
+      id INTEGER PRIMARY KEY,
+      student_id INTEGER NOT NULL REFERENCES students(id),
+      name TEXT NOT NULL,
+      category_id TEXT NOT NULL,
+      condition_key TEXT NOT NULL,
+      description TEXT NOT NULL,
+      zone TEXT NOT NULL CHECK (zone IN ('A', 'B', 'C')),
+      slot_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('pending_dropoff', 'pending_review', 'approved', 'returned', 'cancelled', 'returned_removed', 'redeemed')),
+      photo_filename TEXT NOT NULL,
+      photo_mime TEXT NOT NULL,
+      photo_size INTEGER NOT NULL,
+      template_version TEXT NOT NULL,
+      base_points INTEGER NOT NULL,
+      condition_multiplier REAL NOT NULL,
+      suggested_points INTEGER NOT NULL,
+      estimate_basis TEXT NOT NULL,
+      final_points INTEGER,
+      return_reason TEXT,
+      idempotency_key TEXT NOT NULL,
+      request_fingerprint TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      deposited_at TEXT,
+      reviewed_at TEXT,
+      cancelled_at TEXT,
+      removed_at TEXT,
+      UNIQUE(student_id, idempotency_key)
+    ) STRICT;
+    INSERT INTO donations_new SELECT * FROM donations;
+    DROP TABLE donations;
+    ALTER TABLE donations_new RENAME TO donations;
+    CREATE INDEX idx_donations_student ON donations(student_id, id DESC);
+    CREATE INDEX idx_donations_status ON donations(status, id DESC);
     COMMIT;
     PRAGMA foreign_keys = ON;
   `);

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, postJson, type Donation, type LockerSlot, type Session, type Student } from './api';
+import { api, postJson, type Donation, type LockerIssue, type LockerSlot, type Redemption, type Session, type Student } from './api';
 
 export function TeacherPage({ session, refreshSession }: { session: Session | null; refreshSession: () => Promise<Session> }) {
   const [password, setPassword] = useState('');
@@ -13,6 +13,8 @@ export function TeacherPage({ session, refreshSession }: { session: Session | nu
   const [csvName, setCsvName] = useState('');
   const [donations, setDonations] = useState<Donation[]>([]);
   const [lockers, setLockers] = useState<LockerSlot[]>([]);
+  const [redemptions, setRedemptions] = useState<Redemption[]>([]);
+  const [issues, setIssues] = useState<LockerIssue[]>([]);
   const [reviewPoints, setReviewPoints] = useState<Record<number, string>>({});
   const [returnReasons, setReturnReasons] = useState<Record<number, string>>({});
   const [message, setMessage] = useState('');
@@ -26,14 +28,16 @@ export function TeacherPage({ session, refreshSession }: { session: Session | nu
   }
 
   async function loadM3() {
-    const [donationResult, lockerResult] = await Promise.all([
+    const [donationResult, lockerResult, redemptionResult, issueResult] = await Promise.all([
       api<{ donations: Donation[] }>('/api/teacher/donations'), api<{ lockers: LockerSlot[] }>('/api/teacher/lockers'),
+      api<{ redemptions: Redemption[] }>('/api/teacher/redemptions'), api<{ issues: LockerIssue[] }>('/api/teacher/issues'),
     ]);
     setDonations(donationResult.donations); setLockers(lockerResult.lockers);
+    setRedemptions(redemptionResult.redemptions); setIssues(issueResult.issues);
   }
 
   useEffect(() => {
-    if (!authenticated) { setStudents([]); setSelected(null); setDonations([]); setLockers([]); return; }
+    if (!authenticated) { setStudents([]); setSelected(null); setDonations([]); setLockers([]); setRedemptions([]); setIssues([]); return; }
     void loadM3().catch((error: Error) => setMessage(error.message));
   }, [authenticated]);
 
@@ -109,13 +113,23 @@ export function TeacherPage({ session, refreshSession }: { session: Session | nu
 
   if (!authenticated) return <div className="teacher-page"><header className="teacher-heading"><div><p className="section-kicker">一个轻量教师端</p><h1>循环站管理</h1><p>教师口令仅从本地运行环境读取，不会写入页面或仓库。</p></div></header><section className="teacher-login auth-panel"><div><p className="section-kicker">教师登录</p><h2>输入本地教师口令</h2><p>{session?.role === 'student' ? '当前是学生会话，登录教师端将切换会话。' : '未登录教师不能导入名单、搜索学生、审核或发放积分。'}</p></div><form onSubmit={teacherLogin}><label>教师口令<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /></label><button className="real-action" type="submit" disabled={busy}>{busy ? '登录中…' : '登录教师端'}</button></form></section>{message && <p className="inline-notice" role="status">{message}</p>}</div>;
 
+  async function resolveIssue(issue: LockerIssue) {
+    setBusy(true); setMessage('');
+    try {
+      const result = await postJson<{ duplicate: boolean }>(`/api/teacher/issues/${issue.id}/resolve`, {});
+      setMessage(result.duplicate ? '该异常已经处理。' : `已将 ${issue.slotId} 柜位异常标记为已处理；未自动退款或调分。`);
+      await loadM3();
+    } catch (error) { setMessage((error as Error).message); }
+    finally { setBusy(false); }
+  }
+
   const pending = donations.filter((donation) => donation.status === 'pending_review' || donation.status === 'returned');
   const occupied = lockers.filter((slot) => slot.donation);
   const freeCounts = (['A', 'B', 'C'] as const).map((zone) => ({ zone, count: lockers.filter((slot) => slot.zone === zone && slot.state === 'free').length }));
 
   return (
     <div className="teacher-page">
-      <header className="teacher-heading"><div><p className="section-kicker">教师端 · {session.mode === 'demo' ? '演示数据库' : '正式数据库'}</p><h1>循环站管理</h1><p>名单、积分、捐赠审核和真实柜位已接入后端；领取仍待 M4。</p></div><button className="text-action" type="button" onClick={logout} disabled={busy}>退出教师端</button></header>
+      <header className="teacher-heading"><div><p className="section-kicker">教师端 · {session.mode === 'demo' ? '演示数据库' : '正式数据库'}</p><h1>循环站管理</h1><p>名单、积分、捐赠审核、领取和真实柜位已接入后端。</p></div><button className="text-action" type="button" onClick={logout} disabled={busy}>退出教师端</button></header>
       {message && <p className="inline-notice" role="status">{message}</p>}
 
       <section className="m3-review-section">
@@ -138,6 +152,13 @@ export function TeacherPage({ session, refreshSession }: { session: Session | nu
           <section className="live-lockers"><p className="section-kicker">真实柜位概览</p><h2>当前存放内容</h2><div className="free-counts">{freeCounts.map(({ zone, count }) => <span key={zone}><b>{zone}</b>{count} 空闲</span>)}</div><div className="locker-content-list">{occupied.map((slot) => <div key={slot.id}><b>{slot.id}</b><span>{slot.donation?.name}<small>{slot.donation?.donorName ? `${slot.donation.donorName} · ` : ''}{slot.donation?.status}</small></span></div>)}{occupied.length === 0 && <p>当前柜位均为空闲。</p>}</div></section>
         </aside>
       </div>
+      <section className="m4-admin-section">
+        <header className="section-heading"><div><p className="section-kicker">M4 · 领取闭环</p><h2>最近领取与柜位异常</h2></div><span>异常仅人工处理，不自动退款或调分</span></header>
+        <div className="m4-admin-grid">
+          <div><h3>最近领取</h3>{redemptions.map((claim) => <article className="claim-row" key={claim.id}><img src={claim.photoUrl} alt={`${claim.itemName}领取原图`} /><span><strong>{claim.itemName}</strong><small>{claim.studentName} · {claim.studentNumber}</small><small>{claim.slotId} · {claim.pointsSpent} 分 · {new Date(claim.createdAt).toLocaleString('zh-CN')}</small></span></article>)}{redemptions.length === 0 && <p>暂无领取记录。</p>}</div>
+          <div><h3>柜位异常</h3>{issues.map((issue) => <article className="issue-row" key={issue.id}><span><strong>{issue.slotId} · {issue.itemName}</strong><small>{issue.studentName} · {new Date(issue.createdAt).toLocaleString('zh-CN')}</small><p>{issue.description}</p></span>{issue.status === 'open' ? <button className="real-action" type="button" disabled={busy} onClick={() => resolveIssue(issue)}>标记已处理</button> : <b>已处理</b>}</article>)}{issues.length === 0 && <p>暂无柜位异常。</p>}</div>
+        </div>
+      </section>
     </div>
   );
 }

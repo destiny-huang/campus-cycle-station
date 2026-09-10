@@ -9,17 +9,25 @@ export function LockerWallPage({ onSelectItem }: { onSelectItem: (item: DemoItem
   const [lockers, setLockers] = useState<LockerSlot[]>([]);
   const [message, setMessage] = useState('正在读取真实柜位…');
   const zones: ZoneName[] = ['A', 'B', 'C'];
-  useEffect(() => { void api<{ lockers: LockerSlot[] }>('/api/lockers').then((result) => { setLockers(result.lockers); setMessage(''); }).catch((error: Error) => setMessage(error.message)); }, []);
+  function loadLockers() {
+    return api<{ lockers: LockerSlot[] }>('/api/lockers').then((result) => { setLockers(result.lockers); setMessage(''); });
+  }
+  useEffect(() => {
+    void loadLockers().catch((error: Error) => setMessage(error.message));
+    const refresh = () => void loadLockers().catch((error: Error) => setMessage(error.message));
+    window.addEventListener('cycle-inventory-changed', refresh);
+    return () => window.removeEventListener('cycle-inventory-changed', refresh);
+  }, []);
   const items = useMemo<DemoItem[]>(() => lockers.flatMap((slot) => {
     if (!slot.donation) return [];
     const status: SlotStatus = slot.donation.status === 'pending_dropoff' ? 'reserved'
       : slot.donation.status === 'pending_review' ? 'review' : slot.donation.status === 'approved' ? 'available' : 'returned';
     const icon = slot.donation.categoryId === 'book' ? 'book' : slot.donation.categoryId === 'sports' ? 'ball'
       : slot.donation.categoryId === 'durable' ? 'bag' : 'lamp';
-    return [{ id: `donation-${slot.donation.id}`, slot: slot.id, name: slot.donation.name,
+    return [{ id: `donation-${slot.donation.id}`, donationId: slot.donation.id, slot: slot.id, name: slot.donation.name,
       points: slot.donation.finalPoints ?? slot.donation.suggestedPoints, category: slot.donation.categoryId,
       icon, status, condition: slot.donation.condition, note: status === 'available'
-        ? '教师已审核上架；领取功能下一阶段开放。' : '这是当前真实柜位状态，尚未开放领取。',
+        ? '教师已审核上架，学生登录后可确认领取。' : '这是当前真实柜位状态，暂不可领取。',
       photoUrl: status === 'available' ? slot.donation.photoUrl : undefined, isReal: true }];
   }), [lockers]);
   const statuses = useMemo(() => Object.fromEntries(lockers.map((slot) => [slot.id,
@@ -30,7 +38,7 @@ export function LockerWallPage({ onSelectItem }: { onSelectItem: (item: DemoItem
   return (
     <div className="locker-page">
       <header className="locker-heading">
-        <div><p className="section-kicker">当前运行模式 · 真实柜位记录</p><h1>卡通实木柜墙</h1><p>三组柜体共 170 格，状态来自独立 SQLite；领取下一阶段开放。</p></div>
+        <div><p className="section-kicker">当前运行模式 · 真实柜位记录</p><h1>卡通实木柜墙</h1><p>三组柜体共 170 格；审核上架的真实物品可由学生领取。</p></div>
         <ul className="status-legend"><li className="available">已上架</li><li className="reserved">待投放</li><li className="review">待审核</li><li className="returned">待移出</li></ul>
       </header>
       <div className="zone-switch" aria-label="手机柜区切换">

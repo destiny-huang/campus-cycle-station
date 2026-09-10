@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from '
 import { basename, join, resolve } from 'node:path';
 import { getStudent, type AppDatabase, type LockerZone, withTransaction } from './database.js';
 
-export type DonationStatus = 'pending_dropoff' | 'pending_review' | 'approved' | 'returned' | 'cancelled' | 'returned_removed';
+export type DonationStatus = 'pending_dropoff' | 'pending_review' | 'approved' | 'returned' | 'cancelled' | 'returned_removed' | 'redeemed';
 type ConditionKey = 'near_new' | 'normal' | 'worn_but_complete';
 type PointsTemplate = {
   template_version: string;
@@ -19,7 +19,7 @@ const imageTypes = {
 } as const;
 
 export class DonationError extends Error {
-  constructor(public code: string, message: string) { super(message); }
+  constructor(public code: string, message: string, public details: Record<string, unknown> = {}) { super(message); }
 }
 
 export function resolveUploadDirectory(database: AppDatabase, explicit?: string) {
@@ -82,7 +82,7 @@ export function listStudentDonations(database: AppDatabase, studentId: number) {
 }
 
 export function listTeacherDonations(database: AppDatabase, status?: string) {
-  const allowed = ['pending_dropoff', 'pending_review', 'approved', 'returned', 'cancelled', 'returned_removed'];
+  const allowed = ['pending_dropoff', 'pending_review', 'approved', 'returned', 'cancelled', 'returned_removed', 'redeemed'];
   const rows = status && allowed.includes(status)
     ? database.connection.prepare(`${donationSelect} WHERE d.status = ? ORDER BY d.id DESC`).all(status)
     : database.connection.prepare(`${donationSelect} ORDER BY d.id DESC`).all();
@@ -159,7 +159,7 @@ export function createDonation(database: AppDatabase, input: {
   }
 }
 
-function releaseSlot(database: AppDatabase, donationId: number, slotId: string, now: string) {
+export function releaseLockerSlot(database: AppDatabase, donationId: number, slotId: string, now: string) {
   const slot = database.connection.prepare('SELECT zone FROM locker_slots WHERE id = ? AND donation_id = ? AND state != ?')
     .get(slotId, donationId, 'free') as { zone: LockerZone } | undefined;
   if (!slot) return false;
@@ -192,7 +192,7 @@ export function cancelDonation(database: AppDatabase, donationId: number, studen
     if (donation.status !== 'pending_dropoff') throw new DonationError('invalid_status', '已投放物品不能按普通取消释放柜位');
     const now = new Date().toISOString();
     database.connection.prepare(`UPDATE donations SET status = 'cancelled', cancelled_at = ? WHERE id = ?`).run(now, donationId);
-    releaseSlot(database, donationId, donation.slotId, now);
+    releaseLockerSlot(database, donationId, donation.slotId, now);
     return { duplicate: false, donation: getDonation(database, donationId)! };
   });
 }
@@ -230,7 +230,7 @@ export function confirmReturnedRemoved(database: AppDatabase, donationId: number
     if (donation.status === 'returned_removed') return { duplicate: true, donation };
     if (donation.status !== 'returned') throw new DonationError('invalid_status', '只有已退回且实物已移出的申请可以释放柜位');
     const now = new Date().toISOString();
-    releaseSlot(database, donationId, donation.slotId, now);
+    releaseLockerSlot(database, donationId, donation.slotId, now);
     database.connection.prepare(`UPDATE donations SET status = 'returned_removed', removed_at = ? WHERE id = ?`).run(now, donationId);
     return { duplicate: false, donation: getDonation(database, donationId)! };
   });

@@ -13,6 +13,7 @@ export type DemoItem = {
   note: string;
   photoUrl?: string;
   isReal?: boolean;
+  donationId?: number;
 };
 
 export const ZONE_CONFIGS = {

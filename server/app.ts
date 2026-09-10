@@ -11,6 +11,10 @@ import {
   cancelDonation, confirmReturnedRemoved, createDonation, DonationError, getDonation, listLockers,
   listStudentDonations, listTeacherDonations, markDeposited, resolvePhotoPath, reviewDonation,
 } from './donations.js';
+import {
+  createLockerIssue, getRedemption, listStudentRedemptions, listTeacherIssues, listTeacherRedemptions,
+  redeemDonation, resolveLockerIssue, resolveRedemptionPhotoPath,
+} from './redemptions.js';
 
 const COOKIE_NAME = 'cycle_session';
 const contentTypes: Record<string, string> = {
@@ -59,7 +63,7 @@ async function readJson(request: IncomingMessage): Promise<JsonObject> {
 }
 
 class HttpError extends Error {
-  constructor(public status: number, public code: string, message: string) { super(message); }
+  constructor(public status: number, public code: string, message: string, public details: Record<string, unknown> = {}) { super(message); }
 }
 
 function requireSession(database: AppDatabase, request: IncomingMessage, role: SessionRecord['role']) {
@@ -86,8 +90,8 @@ function serveFrontend(pathname: string, response: ServerResponse) {
 function donationHttpError(error: unknown) {
   if (!(error instanceof DonationError)) return error;
   const status = error.code === 'not_found' ? 404 : error.code === 'forbidden' ? 403
-    : ['zone_full', 'slot_conflict', 'idempotency_conflict', 'invalid_status'].includes(error.code) ? 409 : 400;
-  return new HttpError(status, error.code, error.message);
+    : ['zone_full', 'slot_conflict', 'idempotency_conflict', 'invalid_status', 'insufficient_points', 'already_redeemed', 'not_available'].includes(error.code) ? 409 : 400;
+  return new HttpError(status, error.code, error.message, error.details);
 }
 
 export function createAppServer(database: AppDatabase, options: { teacherPassword?: string; uploadDirectory?: string } = {}) {
@@ -127,6 +131,20 @@ export function createAppServer(database: AppDatabase, options: { teacherPasswor
         const path = resolvePhotoPath(database, donation.photoFilename, options.uploadDirectory);
         if (!existsSync(path)) throw new HttpError(404, 'photo_missing', '照片文件不存在');
         response.writeHead(200, { 'Content-Type': donation.photoMime, 'Content-Length': String(statSync(path).size),
+          'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff' });
+        createReadStream(path).pipe(response);
+        return;
+      }
+
+      const redemptionPhotoMatch = /^\/api\/redemptions\/(\d+)\/photo$/.exec(url.pathname);
+      if (request.method === 'GET' && redemptionPhotoMatch) {
+        const redemption = getRedemption(database, Number(redemptionPhotoMatch[1]));
+        if (!redemption) throw new HttpError(404, 'not_found', '领取照片不存在');
+        const session = getSession(database, readCookie(request));
+        if (session?.role !== 'teacher' && !(session?.role === 'student' && session.studentId === redemption.studentId)) throw new HttpError(403, 'forbidden', '无权查看该领取照片');
+        const path = resolveRedemptionPhotoPath(database, redemption.photoFilename, options.uploadDirectory);
+        if (!existsSync(path)) throw new HttpError(404, 'photo_missing', '照片文件不存在');
+        response.writeHead(200, { 'Content-Type': redemption.photoMime, 'Content-Length': String(statSync(path).size),
           'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff' });
         createReadStream(path).pipe(response);
         return;
@@ -176,6 +194,12 @@ export function createAppServer(database: AppDatabase, options: { teacherPasswor
         return;
       }
 
+      if (request.method === 'GET' && url.pathname === '/api/student/redemptions') {
+        const session = requireSession(database, request, 'student');
+        sendJson(response, 200, { redemptions: listStudentRedemptions(database, session.studentId!) });
+        return;
+      }
+
       if (request.method === 'POST' && url.pathname === '/api/student/donations') {
         const session = requireSession(database, request, 'student');
         const body = await readJson(request);
@@ -205,6 +229,30 @@ export function createAppServer(database: AppDatabase, options: { teacherPasswor
         return;
       }
 
+      const redeemMatch = /^\/api\/student\/donations\/(\d+)\/redeem$/.exec(url.pathname);
+      if (request.method === 'POST' && redeemMatch) {
+        const session = requireSession(database, request, 'student');
+        const body = await readJson(request);
+        const idempotencyKey = String(body.idempotencyKey ?? '').trim();
+        if (idempotencyKey.length < 16 || idempotencyKey.length > 128) throw new HttpError(400, 'invalid_idempotency_key', '请求标识无效');
+        try { sendJson(response, 200, { ok: true, ...redeemDonation(database, { studentId: session.studentId!, donationId: Number(redeemMatch[1]), idempotencyKey }) }); }
+        catch (error) { throw donationHttpError(error); }
+        return;
+      }
+
+      const issueMatch = /^\/api\/student\/redemptions\/(\d+)\/issues$/.exec(url.pathname);
+      if (request.method === 'POST' && issueMatch) {
+        const session = requireSession(database, request, 'student');
+        const body = await readJson(request);
+        const description = String(body.description ?? '').trim();
+        const idempotencyKey = String(body.idempotencyKey ?? '').trim();
+        if (description.length < 2 || description.length > 300) throw new HttpError(400, 'invalid_description', '请填写 2–300 字的异常说明');
+        if (idempotencyKey.length < 16 || idempotencyKey.length > 128) throw new HttpError(400, 'invalid_idempotency_key', '请求标识无效');
+        try { sendJson(response, 201, { ok: true, ...createLockerIssue(database, { studentId: session.studentId!, redemptionId: Number(issueMatch[1]), description, idempotencyKey }) }); }
+        catch (error) { throw donationHttpError(error); }
+        return;
+      }
+
       if (request.method === 'GET' && url.pathname === '/api/teacher/students') {
         requireSession(database, request, 'teacher');
         const query = (url.searchParams.get('query') ?? '').trim();
@@ -222,6 +270,26 @@ export function createAppServer(database: AppDatabase, options: { teacherPasswor
       if (request.method === 'GET' && url.pathname === '/api/teacher/lockers') {
         requireSession(database, request, 'teacher');
         sendJson(response, 200, { lockers: listLockers(database, true) });
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/teacher/redemptions') {
+        requireSession(database, request, 'teacher');
+        sendJson(response, 200, { redemptions: listTeacherRedemptions(database) });
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/teacher/issues') {
+        requireSession(database, request, 'teacher');
+        sendJson(response, 200, { issues: listTeacherIssues(database) });
+        return;
+      }
+
+      const resolveIssueMatch = /^\/api\/teacher\/issues\/(\d+)\/resolve$/.exec(url.pathname);
+      if (request.method === 'POST' && resolveIssueMatch) {
+        requireSession(database, request, 'teacher');
+        try { sendJson(response, 200, { ok: true, ...resolveLockerIssue(database, Number(resolveIssueMatch[1])) }); }
+        catch (error) { throw donationHttpError(error); }
         return;
       }
 
@@ -276,7 +344,7 @@ export function createAppServer(database: AppDatabase, options: { teacherPasswor
       sendJson(response, 404, { ok: false, code: 'not_found', message: '接口不存在' });
     })().catch((error: unknown) => {
       if (response.headersSent) { response.end(); return; }
-      if (error instanceof HttpError) sendJson(response, error.status, { ok: false, code: error.code, message: error.message });
+      if (error instanceof HttpError) sendJson(response, error.status, { ok: false, code: error.code, message: error.message, ...error.details });
       else { console.error(error); sendJson(response, 500, { ok: false, code: 'internal_error', message: '服务器处理失败' }); }
     });
   });
