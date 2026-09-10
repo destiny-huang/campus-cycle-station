@@ -1,10 +1,11 @@
 # 校园循环站 / Campus Cycle Station
 
-本仓库已完成 M1 可运行工程骨架；登录、积分、捐赠、领取和真实 AI 均待后续开发。
+本仓库已完成 M2：可运行工程骨架、学生/教师登录、学生名单导入和积分账本。捐赠、领取、真实库存和真实 AI 仍待后续开发。
 
-## 当前状态（2026-09-09）
+## 当前状态（2026-09-10）
 - 技术栈：React + TypeScript + Vite；Node 内置 HTTP API；独立 SQLite 文件。
 - 页面入口：`/student`、`/teacher`、`/locker-wall`。
+- 学生使用已导入名单中的姓名＋学号登录；教师可导入 CSV、搜索学生和发放劳动奖励。
 - 健康接口：`/api/health`；AI 明确为 `mock` 模式，不调用真实服务。
 - 未连接、修改或部署腾讯云服务器，未对 SubQuiz 执行操作。
 
@@ -14,21 +15,33 @@
 
 ```powershell
 Set-Location 'E:\Work-2\campus-cycle-station'
-npm install
+$env:TEACHER_PASSWORD='<请在本机自定口令>'
 npm run dev
 ```
 
-打开 `http://127.0.0.1:5173/student`。同一页面顶部可切换教师端和柜墙；按 API 默认监听 `http://127.0.0.1:3001`。按 `Ctrl+C` 同时停止两个开发服务。
+依赖尚未安装时先执行一次 `npm install`。默认使用正式本地数据路径；打开 `http://127.0.0.1:5173/student`，页面顶部可切换教师端和柜墙，API 默认监听 `http://127.0.0.1:3001`。按 `Ctrl+C` 同时停止两个开发服务。
+
+需要使用仓库内 6 名虚构学生演示时，新 PowerShell 窗口执行：
+
+```powershell
+Set-Location 'E:\Work-2\campus-cycle-station'
+$env:CYCLE_MODE='demo'
+$env:TEACHER_PASSWORD='<请在本机自定口令>'
+npm run dev
+```
+
+演示账号为 `演示同学01` / `DEMO001` 至 `演示同学06` / `DEMO006`，每人首次初始化总额为 200 分。普通 CSV 新学生首次初始化为 20 分；重复导入、登录和重启不会重复发放。教师 CSV 表头为 `name,student_id,class_name`。
 
 常用检查：
 
 ```powershell
 npm run db:check
+npm run m2:check
 npm run typecheck
 npm run build
 ```
 
-默认数据库写入 `data/campus-cycle-station.sqlite`，该路径不进入 Git。Node 22 的内置 SQLite API 仍会显示实验性警告；M1 已验证实际读写可用。
+数据库按环境隔离写入 `data/production/campus-cycle-station.sqlite` 或 `data/demo/campus-cycle-station.sqlite`，均不进入 Git；确有需要时可用本地环境变量 `CYCLE_DB_PATH` 指定其他路径。Node 22 的内置 SQLite API 仍会显示实验性警告，相关读写已实际验证。
 
 ## 文件导航
 - AGENTS.md：执行边界与低上下文工作方式。
