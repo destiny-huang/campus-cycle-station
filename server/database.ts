@@ -119,6 +119,7 @@ export function openDatabase(options: { path?: string; mode?: AppMode } = {}): A
     CREATE INDEX IF NOT EXISTS idx_locker_fifo ON locker_slots(zone, state, queue_order);
   `);
   migrateDonations(connection);
+  migrateAiFeatures(connection);
   connection.exec(`
     CREATE TABLE IF NOT EXISTS redemptions (
       id INTEGER PRIMARY KEY,
@@ -151,6 +152,66 @@ export function openDatabase(options: { path?: string; mode?: AppMode } = {}): A
   `);
   initializeLockerSlots(connection);
   return { connection, path, mode };
+}
+
+function addColumn(connection: DatabaseSync, table: string, definition: string) {
+  const name = definition.trim().split(/\s+/)[0];
+  const columns = connection.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === name)) connection.exec(`ALTER TABLE ${table} ADD COLUMN ${definition};`);
+}
+
+function migrateAiFeatures(connection: DatabaseSync) {
+  addColumn(connection, 'donations', "photo_sha256 TEXT NOT NULL DEFAULT ''");
+  addColumn(connection, 'donations', "ai_status TEXT NOT NULL DEFAULT 'disabled'");
+  addColumn(connection, 'donations', 'ai_model TEXT');
+  addColumn(connection, 'donations', 'ai_result_json TEXT');
+  addColumn(connection, 'donations', 'ai_error TEXT');
+  addColumn(connection, 'donations', 'ai_analyzed_at TEXT');
+  addColumn(connection, 'donations', 'ai_prompt_version TEXT');
+  addColumn(connection, 'donations', 'ai_suggested_points INTEGER');
+  addColumn(connection, 'donations', 'cartoon_filename TEXT');
+  connection.exec(`
+    CREATE TABLE IF NOT EXISTS ai_usage (
+      id INTEGER PRIMARY KEY,
+      task_type TEXT NOT NULL CHECK (task_type IN ('vision', 'agent', 'image')),
+      model TEXT NOT NULL,
+      success INTEGER NOT NULL CHECK (success IN (0, 1)),
+      prompt_tokens INTEGER,
+      completion_tokens INTEGER,
+      cost_usd REAL,
+      request_id TEXT,
+      error_message TEXT,
+      created_at TEXT NOT NULL
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS idx_ai_usage_created ON ai_usage(created_at DESC);
+    CREATE TABLE IF NOT EXISTS cartoon_jobs (
+      id INTEGER PRIMARY KEY,
+      donation_id INTEGER NOT NULL UNIQUE REFERENCES donations(id),
+      status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'succeeded', 'failed')),
+      input_sha256 TEXT NOT NULL,
+      model TEXT NOT NULL,
+      prompt_version TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TEXT NOT NULL,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS idx_cartoon_jobs_queue ON cartoon_jobs(status, next_attempt_at, id);
+    CREATE TABLE IF NOT EXISTS cartoon_cache (
+      cache_key TEXT PRIMARY KEY,
+      filename TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    ) STRICT;
+    CREATE TABLE IF NOT EXISTS vision_cache (
+      cache_key TEXT PRIMARY KEY,
+      result_json TEXT NOT NULL,
+      suggested_points INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    ) STRICT;
+  `);
+  connection.prepare("UPDATE cartoon_jobs SET status = 'pending', next_attempt_at = ?, updated_at = ? WHERE status = 'running'")
+    .run(new Date().toISOString(), new Date().toISOString());
 }
 
 function migrateStudentOnboarding(connection: DatabaseSync) {

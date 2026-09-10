@@ -24,6 +24,7 @@ var/
 runtime/
 private/
 uploads/
+generated/
 backups/
 *.db
 *.db-*

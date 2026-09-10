@@ -69,7 +69,7 @@ export default function App() {
         {page === 'teacher' && <TeacherPage session={session} refreshSession={refreshSession} onLoggedOut={() => navigate('home')} />}
         {page === 'locker-wall' && <LockerWallPage onSelectItem={openItem} />}
       </main>
-      <footer><span>M4 捐赠、领取与柜位闭环</span><span>{session?.mode === 'demo' ? '演示环境' : '正式本地环境'} · 真实 AI 待开发</span></footer>
+      <footer><span>M5 OpenRouter AI体验</span><span>{session?.mode === 'demo' ? '演示环境' : '正式本地环境'} · AI失败不影响核心流程</span></footer>
       {selectedItem && <DemoDialog item={selectedItem} session={session} onClose={closeItem} onRedeemed={async () => {
         await refreshSession();
         window.dispatchEvent(new Event('cycle-inventory-changed'));

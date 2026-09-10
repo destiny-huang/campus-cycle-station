@@ -44,7 +44,7 @@ const pending = createDonation(database, {
   photoDataUrl, idempotencyKey: 'm4-pending-own-donation-0001', uploadDirectory,
 }).donation;
 
-const server = createAppServer(database, { teacherPassword: 'm4-local-test-only', uploadDirectory });
+const server = createAppServer(database, { teacherPassword: 'm4-local-test-only', uploadDirectory, backgroundAi: false });
 await new Promise<void>((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
 const address = server.address();
 if (!address || typeof address === 'string') throw new Error('test server address unavailable');

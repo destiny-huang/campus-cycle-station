@@ -13,6 +13,10 @@ export type Donation = {
   templateVersion: string; basePoints: number; conditionMultiplier: number; suggestedPoints: number;
   estimateBasis: string; finalPoints: number | null; returnReason: string | null; createdAt: string;
   depositedAt: string | null; reviewedAt: string | null;
+  photoSha256: string; aiStatus: 'pending' | 'running' | 'succeeded' | 'failed' | 'disabled'; aiModel: string | null;
+  aiResult: null | { objectName: string; category: string; condition: string; visibleIssues: string[]; manualChecks: string[]; confidence: number; basePoints: number; multiplier: number; suggestedPoints: number };
+  aiError: string | null; aiAnalyzedAt: string | null; aiSuggestedPoints: number | null;
+  cartoonUrl: string | null; cartoonStatus: 'pending' | 'running' | 'succeeded' | 'failed' | null;
 };
 export type Redemption = {
   id: number; donationId: number; studentId: number; studentName: string; studentNumber: string; className: string;
@@ -25,7 +29,12 @@ export type LockerIssue = {
 export type LockerSlot = {
   id: string; zone: 'A' | 'B' | 'C'; number: number; state: 'free' | 'reserved' | 'occupied'; queueOrder: number;
   donation: null | Pick<Donation, 'id' | 'name' | 'categoryId' | 'condition' | 'status' | 'suggestedPoints' | 'finalPoints' | 'photoUrl'>
-    & Partial<Pick<Donation, 'description' | 'donorName' | 'donorNumber' | 'className'>>;
+    & Partial<Pick<Donation, 'description' | 'donorName' | 'donorNumber' | 'className' | 'cartoonUrl'>>;
+};
+
+export type AiStatus = {
+  configured: boolean; state: 'ready' | 'disabled'; models: { vision: string; image: string; agent: string };
+  today: { calls: number; successes: number; failures: number; recordedCostUsd: number; budgetUsd: number }; recentError: string | null;
 };
 
 export class ApiError extends Error {
