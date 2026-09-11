@@ -29,7 +29,7 @@ markDeposited(database, donation.id, demo.DEMO001.id);
 reviewDonation(database, donation.id, { action: 'approve', finalPoints: 10 });
 redeemDonation(database, { studentId: demo.DEMO002.id, donationId: donation.id, idempotencyKey: 'm45-redemption-preserve-0001' });
 
-const server = createAppServer(database, { teacherPassword: 'm45-local-test-only', uploadDirectory });
+const server = createAppServer(database, { teacherPassword: 'm45-local-test-only', uploadDirectory, backgroundAi: false });
 await new Promise<void>((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
 const address = server.address();
 if (!address || typeof address === 'string') throw new Error('test server address unavailable');

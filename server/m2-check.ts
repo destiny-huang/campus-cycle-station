@@ -27,7 +27,7 @@ const secondImport = importStudents(database, sameNameRows, 20);
 assert(firstImport.created === 2 && secondImport.created === 0, 'ordinary import must be idempotent');
 assert(searchStudents(database, '同名同学').every((student) => student.balance === 20), 'ordinary balances must be 20');
 
-const server = createAppServer(database, { teacherPassword: 'local-test-only' });
+const server = createAppServer(database, { teacherPassword: 'local-test-only', backgroundAi: false });
 await new Promise<void>((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
 const address = server.address();
 if (!address || typeof address === 'string') throw new Error('test server address unavailable');

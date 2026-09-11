@@ -1,4 +1,5 @@
 import { DEMO_ITEMS, SLOT_OVERRIDES, ZONE_CONFIGS, type DemoItem, type SlotStatus, type ZoneName } from './demo-data';
+import { useEffect, useState } from 'react';
 
 const statusLabels: Record<SlotStatus, string> = {
   empty: '空闲',
@@ -20,6 +21,15 @@ function ItemDrawing({ icon }: { icon: DemoItem['icon'] }) {
     return <svg viewBox="0 0 72 58" aria-hidden="true"><circle cx="36" cy="29" r="22" fill="#e98b43" stroke="#6b4a31" strokeWidth="2"/><path d="M15 29h42M36 7c-8 9-8 35 0 44M36 7c8 9 8 35 0 44M20 14c8 7 24 7 32 0M20 44c8-7 24-7 32 0" fill="none" stroke="#6b4a31" strokeWidth="2"/></svg>;
   }
   return <svg viewBox="0 0 72 58" aria-hidden="true"><path d="M18 19h36l5 33H13z" fill="#79a6c5" stroke="#405c67" strokeWidth="2"/><path d="M26 20c0-13 20-13 20 0" fill="none" stroke="#405c67" strokeWidth="4"/><path d="M22 29h28" stroke="#dcecf2" strokeWidth="3"/></svg>;
+}
+
+function ItemArtwork({ item }: { item: DemoItem }) {
+  const [cartoonFailed, setCartoonFailed] = useState(false); const [photoFailed, setPhotoFailed] = useState(false);
+  useEffect(() => { setCartoonFailed(false); }, [item.cartoonUrl]);
+  useEffect(() => { setPhotoFailed(false); }, [item.photoUrl]);
+  if (item.cartoonUrl && !cartoonFailed) return <img src={item.cartoonUrl} alt="" onError={() => setCartoonFailed(true)} />;
+  if (item.photoUrl && !photoFailed) return <img src={item.photoUrl} alt="" onError={() => setPhotoFailed(true)} />;
+  return <ItemDrawing icon={item.icon} />;
 }
 
 function slotId(zone: ZoneName, number: number) {
@@ -68,7 +78,7 @@ export function WoodCabinet({ zone, page, onPageChange, onSelectItem, className 
               aria-label={`${slot.id}，${slot.item?.name ?? statusLabels[slot.status]}，${statusLabels[slot.status]}`}
             >
               <span className={`slot-state state-${slot.status}`}>{statusLabels[slot.status]}</span>
-              {slot.item && <span className="slot-object"><ItemDrawing icon={slot.item.icon} /></span>}
+              {slot.item && <span className="slot-object"><ItemArtwork item={slot.item} /></span>}
               <span className="slot-label">{slot.id}</span>
             </button>
           ) : <span className="cabinet-slot slot-filler" aria-hidden="true" key={`filler-${index}`} />)}

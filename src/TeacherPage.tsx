@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, postJson, type Donation, type LockerIssue, type LockerSlot, type Redemption, type Session, type Student } from './api';
+import { api, postJson, type AiStatus, type Donation, type LockerIssue, type LockerSlot, type Redemption, type Session, type Student } from './api';
 
 export function TeacherPage({ session, refreshSession, onLoggedOut }: {
   session: Session | null; refreshSession: () => Promise<Session>; onLoggedOut: () => void;
@@ -21,6 +21,7 @@ export function TeacherPage({ session, refreshSession, onLoggedOut }: {
   const [returnReasons, setReturnReasons] = useState<Record<number, string>>({});
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
   const authenticated = session?.role === 'teacher';
 
   async function loadStudents(search = query) {
@@ -30,12 +31,13 @@ export function TeacherPage({ session, refreshSession, onLoggedOut }: {
   }
 
   async function loadM3() {
-    const [donationResult, lockerResult, redemptionResult, issueResult] = await Promise.all([
+    const [donationResult, lockerResult, redemptionResult, issueResult, aiResult] = await Promise.all([
       api<{ donations: Donation[] }>('/api/teacher/donations'), api<{ lockers: LockerSlot[] }>('/api/teacher/lockers'),
       api<{ redemptions: Redemption[] }>('/api/teacher/redemptions'), api<{ issues: LockerIssue[] }>('/api/teacher/issues'),
+      api<{ ai: AiStatus }>('/api/teacher/ai-status'),
     ]);
     setDonations(donationResult.donations); setLockers(lockerResult.lockers);
-    setRedemptions(redemptionResult.redemptions); setIssues(issueResult.issues);
+    setRedemptions(redemptionResult.redemptions); setIssues(issueResult.issues); setAiStatus(aiResult.ai);
   }
 
   useEffect(() => {
@@ -137,6 +139,20 @@ export function TeacherPage({ session, refreshSession, onLoggedOut }: {
     finally { setBusy(false); }
   }
 
+  async function testAi() {
+    setBusy(true); setMessage('');
+    try { const result = await postJson<{ reply: string }>('/api/teacher/ai-test', {}); setMessage(`AI连接成功：${result.reply}`); await loadM3(); }
+    catch (error) { setMessage((error as Error).message); await loadM3().catch(() => undefined); }
+    finally { setBusy(false); }
+  }
+
+  async function rerunAi(donation: Donation) {
+    setBusy(true); setMessage('');
+    try { await postJson(`/api/teacher/donations/${donation.id}/analyze`, {}); setMessage('AI重新分析完成。'); await loadM3(); }
+    catch (error) { setMessage((error as Error).message); await loadM3().catch(() => undefined); }
+    finally { setBusy(false); }
+  }
+
   const pending = donations.filter((donation) => donation.status === 'pending_review' || donation.status === 'returned');
   const occupied = lockers.filter((slot) => slot.donation);
   const freeCounts = (['A', 'B', 'C'] as const).map((zone) => ({ zone, count: lockers.filter((slot) => slot.zone === zone && slot.state === 'free').length }));
@@ -147,16 +163,22 @@ export function TeacherPage({ session, refreshSession, onLoggedOut }: {
       {message && <p className="inline-notice" role="status">{message}</p>}
 
       <section className="m3-review-section">
-        <header className="section-heading"><div><p className="section-kicker">M3 · 实物核验后才发分</p><h2>待审核与待移出物品</h2></div><span>规则估分，未接真实 AI；教师可修改最终整数积分</span></header>
+        <header className="section-heading"><div><p className="section-kicker">实物核验后才发分</p><h2>待审核与待移出物品</h2></div><span>AI识物 + 系统模板估分；教师确认最终整数积分</span></header>
         <div className="m3-review-list">
           {pending.map((donation) => <article className="m3-review-card" key={donation.id}>
             <img src={donation.photoUrl} alt={`${donation.name}原图`} />
             <div className="review-info"><strong>{donation.name}</strong><small>{donation.donorName} · {donation.className} · {donation.donorNumber}</small><dl><div><dt>柜位</dt><dd>{donation.slotId}</dd></div><div><dt>类别/成色</dt><dd>{donation.categoryId} / {donation.condition}</dd></div><div><dt>规则建议</dt><dd>{donation.suggestedPoints} 分</dd></div><div><dt>模板</dt><dd>{donation.templateVersion}</dd></div></dl><p>{donation.description || '学生未填写补充说明'}</p></div>
-            {donation.status === 'pending_review' ? <div className="review-controls"><label>最终整数积分<input type="number" min="1" max="10000" step="1" value={reviewPoints[donation.id] ?? String(donation.suggestedPoints)} onChange={(event) => setReviewPoints((current) => ({ ...current, [donation.id]: event.target.value }))} /></label><button className="real-action" type="button" disabled={busy} onClick={() => reviewDonation(donation, 'approve')}>审核通过并上架</button><label>退回原因<input value={returnReasons[donation.id] ?? ''} maxLength={200} onChange={(event) => setReturnReasons((current) => ({ ...current, [donation.id]: event.target.value }))} placeholder="实物核验不通过时填写" /></label><button className="secondary-action" type="button" disabled={busy} onClick={() => reviewDonation(donation, 'return')}>退回并保留占柜</button></div>
+            {donation.status === 'pending_review' ? <div className="review-controls"><div className="ai-review"><strong>AI判断</strong><p>{donation.aiStatus === 'succeeded' ? `${donation.aiResult?.objectName} · ${donation.aiResult?.category} · ${donation.aiResult?.condition} · 置信度 ${Math.round((donation.aiResult?.confidence ?? 0) * 100)}%` : donation.aiStatus === 'failed' ? `分析失败：${donation.aiError ?? '未知原因'}` : donation.aiStatus === 'disabled' ? 'AI服务暂未启用，继续使用规则估分' : 'AI正在分析'}</p>{donation.aiResult && <><small>可见问题：{donation.aiResult.visibleIssues.join('、') || '未发现'}</small><small>人工核实：{donation.aiResult.manualChecks.join('、') || '无额外项'}</small><small>系统计算：基准 {donation.aiResult.basePoints} × {donation.aiResult.multiplier} = {donation.aiResult.suggestedPoints} 分</small></>}<button type="button" disabled={busy || !aiStatus?.configured} onClick={() => rerunAi(donation)}>重新分析</button></div><label>最终整数积分<input type="number" min="1" max="10000" step="1" value={reviewPoints[donation.id] ?? String(donation.aiSuggestedPoints ?? donation.suggestedPoints)} onChange={(event) => setReviewPoints((current) => ({ ...current, [donation.id]: event.target.value }))} /></label><button className="real-action" type="button" disabled={busy} onClick={() => reviewDonation(donation, 'approve')}>审核通过并上架</button><label>退回原因<input value={returnReasons[donation.id] ?? ''} maxLength={200} onChange={(event) => setReturnReasons((current) => ({ ...current, [donation.id]: event.target.value }))} placeholder="实物核验不通过时填写" /></label><button className="secondary-action" type="button" disabled={busy} onClick={() => reviewDonation(donation, 'return')}>退回并保留占柜</button></div>
               : <div className="review-controls returned-controls"><p>退回原因：{donation.returnReason}</p><button className="real-action" type="button" disabled={busy} onClick={() => releaseReturned(donation)}>确认实物已移出并释放柜位</button></div>}
           </article>)}
           {pending.length === 0 && <p className="empty-state">当前没有待审核或待移出的物品。</p>}
         </div>
+      </section>
+      <section className="ai-admin-section">
+        <header><div><p className="section-kicker">M5 · AI状态</p><h2>OpenRouter</h2></div><b className={aiStatus?.configured ? 'configured' : ''}>{aiStatus?.configured ? '已配置' : '未配置'}</b></header>
+        <dl><div><dt>识物模型</dt><dd>{aiStatus?.models.vision ?? '—'}</dd></div><div><dt>图片模型</dt><dd>{aiStatus?.models.image ?? '—'}</dd></div><div><dt>助手模型</dt><dd>{aiStatus?.models.agent ?? '—'}</dd></div></dl>
+        <p>今日 {aiStatus?.today.calls ?? 0} 次 · 成功 {aiStatus?.today.successes ?? 0} · 失败 {aiStatus?.today.failures ?? 0} · 已记录费用 ${Number(aiStatus?.today.recordedCostUsd ?? 0).toFixed(6)} / ${Number(aiStatus?.today.budgetUsd ?? 0).toFixed(2)}</p>
+        {aiStatus?.recentError && <small>最近错误：{aiStatus.recentError}</small>}<button type="button" disabled={busy || !aiStatus?.configured} onClick={testAi}>测试AI连接</button>
       </section>
 
       <div className="m2-workspace">

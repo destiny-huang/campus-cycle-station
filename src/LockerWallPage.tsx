@@ -28,7 +28,8 @@ export function LockerWallPage({ onSelectItem }: { onSelectItem: (item: DemoItem
       points: slot.donation.finalPoints ?? slot.donation.suggestedPoints, category: slot.donation.categoryId,
       icon, status, condition: slot.donation.condition, note: status === 'available'
         ? '教师已审核上架，学生登录后可确认领取。' : '这是当前真实柜位状态，暂不可领取。',
-      photoUrl: status === 'available' ? slot.donation.photoUrl : undefined, isReal: true }];
+      photoUrl: status === 'available' ? slot.donation.photoUrl : undefined,
+      cartoonUrl: status === 'available' ? slot.donation.cartoonUrl ?? undefined : undefined, isReal: true }];
   }), [lockers]);
   const statuses = useMemo(() => Object.fromEntries(lockers.map((slot) => [slot.id,
     slot.state === 'free' ? 'empty' : slot.donation?.status === 'pending_dropoff' ? 'reserved'

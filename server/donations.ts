@@ -52,6 +52,8 @@ function estimate(categoryId: string, condition: string) {
   };
 }
 
+export function estimatePoints(categoryId: string, condition: string) { return estimate(categoryId, condition); }
+
 function mapDonation(row: Record<string, unknown>) {
   return {
     id: Number(row.id), studentId: Number(row.student_id), donorName: String(row.donor_name ?? ''),
@@ -64,12 +66,21 @@ function mapDonation(row: Record<string, unknown>) {
     estimateBasis: String(row.estimate_basis), finalPoints: row.final_points === null ? null : Number(row.final_points),
     returnReason: row.return_reason === null ? null : String(row.return_reason), createdAt: String(row.created_at),
     depositedAt: row.deposited_at === null ? null : String(row.deposited_at), reviewedAt: row.reviewed_at === null ? null : String(row.reviewed_at),
+    photoSha256: String(row.photo_sha256 ?? ''), aiStatus: String(row.ai_status ?? 'disabled'),
+    aiModel: row.ai_model === null || row.ai_model === undefined ? null : String(row.ai_model),
+    aiResult: row.ai_result_json ? JSON.parse(String(row.ai_result_json)) as Record<string, unknown> : null,
+    aiError: row.ai_error === null || row.ai_error === undefined ? null : String(row.ai_error),
+    aiAnalyzedAt: row.ai_analyzed_at === null || row.ai_analyzed_at === undefined ? null : String(row.ai_analyzed_at),
+    aiSuggestedPoints: row.ai_suggested_points === null || row.ai_suggested_points === undefined ? null : Number(row.ai_suggested_points),
+    cartoonUrl: row.cartoon_filename ? `/api/donations/${row.id}/cartoon` : null,
+    cartoonStatus: row.cartoon_job_status === null || row.cartoon_job_status === undefined ? null : String(row.cartoon_job_status),
   };
 }
 
 const donationSelect = `
-  SELECT d.*, s.name AS donor_name, s.student_number, s.class_name
+  SELECT d.*, s.name AS donor_name, s.student_number, s.class_name, cj.status AS cartoon_job_status
   FROM donations d JOIN students s ON s.id = d.student_id
+  LEFT JOIN cartoon_jobs cj ON cj.donation_id = d.id
 `;
 
 export function getDonation(database: AppDatabase, id: number) {
@@ -93,7 +104,7 @@ export function listLockers(database: AppDatabase, includePrivate = false) {
   const rows = database.connection.prepare(`
     SELECT l.id, l.zone, l.slot_number, l.state, l.queue_order,
       d.id AS donation_id, d.name, d.category_id, d.condition_key, d.description, d.status,
-      d.suggested_points, d.final_points, s.name AS donor_name, s.student_number, s.class_name
+      d.suggested_points, d.final_points, d.cartoon_filename, s.name AS donor_name, s.student_number, s.class_name
     FROM locker_slots l
     LEFT JOIN donations d ON d.id = l.donation_id
     LEFT JOIN students s ON s.id = d.student_id
@@ -105,6 +116,7 @@ export function listLockers(database: AppDatabase, includePrivate = false) {
       id: Number(row.donation_id), name: String(row.name), categoryId: String(row.category_id), condition: String(row.condition_key),
       status: row.status as DonationStatus, suggestedPoints: Number(row.suggested_points),
       finalPoints: row.final_points === null ? null : Number(row.final_points), photoUrl: `/api/donations/${row.donation_id}/photo`,
+      cartoonUrl: row.cartoon_filename ? `/api/donations/${row.donation_id}/cartoon` : null,
       ...(includePrivate ? { description: String(row.description), donorName: String(row.donor_name), donorNumber: String(row.student_number), className: String(row.class_name) } : {}),
     },
   }));
@@ -134,6 +146,7 @@ export function createDonation(database: AppDatabase, input: {
       const slot = database.connection.prepare(`SELECT id FROM locker_slots WHERE zone = ? AND state = 'free' ORDER BY queue_order, slot_number LIMIT 1`)
         .get(input.zone) as { id: string } | undefined;
       if (!slot) throw new DonationError('zone_full', `${input.zone} 区暂无空柜位，请稍后再试`);
+      const photoSha256 = createHash('sha256').update(photo.data).digest('hex');
       const filename = `${randomUUID()}.${photo.extension}`;
       writtenPath = join(uploadDirectory, filename);
       writeFileSync(writtenPath, photo.data, { flag: 'wx' });
@@ -142,11 +155,11 @@ export function createDonation(database: AppDatabase, input: {
         INSERT INTO donations (
           student_id, name, category_id, condition_key, description, zone, slot_id, status,
           photo_filename, photo_mime, photo_size, template_version, base_points, condition_multiplier,
-          suggested_points, estimate_basis, final_points, return_reason, idempotency_key, request_fingerprint, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_dropoff', ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
+          suggested_points, estimate_basis, final_points, return_reason, idempotency_key, request_fingerprint, created_at, photo_sha256
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_dropoff', ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)
       `).run(input.studentId, input.name, input.categoryId, input.condition, input.description, input.zone, slot.id,
         filename, photo.mime, photo.data.length, template.template_version, calculated.category.base_points,
-        calculated.multiplier, calculated.suggestedPoints, calculated.basis, input.idempotencyKey, fingerprint, now);
+        calculated.multiplier, calculated.suggestedPoints, calculated.basis, input.idempotencyKey, fingerprint, now, photoSha256);
       const donationId = Number(result.lastInsertRowid);
       const reserved = database.connection.prepare(`UPDATE locker_slots SET state = 'reserved', donation_id = ?, updated_at = ? WHERE id = ? AND state = 'free'`)
         .run(donationId, now, slot.id);

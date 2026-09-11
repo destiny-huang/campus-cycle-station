@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'r
 import { api, postJson, type Donation, type LedgerEntry, type Redemption, type Session, type Student } from './api';
 import { DEMO_ITEMS, type DemoItem } from './demo-data';
 import { OnboardingTutorial } from './OnboardingTutorial';
+import { AiAssistant } from './AiAssistant';
 
 const itemIcons = { book: '📚', lamp: '💡', ball: '🏀', bag: '🎒' };
 const categories = [
@@ -69,6 +70,12 @@ export function StudentPage({ session, refreshSession, onSelectItem, onLoggedOut
     if (session.student?.onboardingCompletedAt === null) setShowTutorial(true);
     void loadStudentData().catch((error: Error) => setMessage(error.message));
   }, [session]);
+
+  useEffect(() => {
+    if (!donations.some((item) => item.aiStatus === 'pending' || item.aiStatus === 'running')) return;
+    const timer = window.setInterval(() => void loadStudentData().catch(() => undefined), 2500);
+    return () => window.clearInterval(timer);
+  }, [donations]);
 
   async function login(event: FormEvent) {
     event.preventDefault(); setBusy(true); setMessage('');
@@ -174,11 +181,11 @@ export function StudentPage({ session, refreshSession, onSelectItem, onLoggedOut
               <label>尺寸区<select value={zone} onChange={(event) => setZone(event.target.value as 'A' | 'B' | 'C')}><option value="A">A区 · 小件</option><option value="B">B区 · 中件</option><option value="C">C区 · 大件</option></select></label>
               <label className="wide-field">说明<textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={500} placeholder="完整程度、缺页或配件情况请如实填写" /></label>
               <label className="photo-picker wide-field">真实照片<input type="file" accept="image/jpeg,image/png,image/webp" onChange={selectPhoto} required={!photoDataUrl} /><small>{photoName || '支持 JPEG、PNG、WebP，最大 3MB；拍照背景尽量干净，避免个人信息。'}</small></label>
-              <p className="rule-estimate wide-field">规则估分，未接真实 AI。系统只根据类别模板与所填成色建议积分，不会从照片断言缺页或配件情况。</p>
+              <p className="rule-estimate wide-field">照片上传后 AI 会尝试识别物品和可见成色；积分仍由系统模板计算并由教师检查实物后确认。AI 不可用时自动保留规则估分。</p>
               <button className="real-action wide-field" type="submit" disabled={busy}>{busy ? '提交中…' : '提交单件申请并分配柜位'}</button>
             </>}
           </form>
-          <div className="donation-records"><h3>我的捐赠记录</h3>{donations.map((donation) => <article key={donation.id} className={`donation-record status-${donation.status}`}><img src={donation.photoUrl} alt={`${donation.name}原图`} /><div><strong>{donation.name}</strong><small>{donation.slotId} · {statusLabels[donation.status]}</small><p>规则建议 {donation.suggestedPoints} 分{donation.finalPoints === null ? '' : ` · 最终 ${donation.finalPoints} 分`}</p>{donation.returnReason && <p>退回原因：{donation.returnReason}</p>}<div className="record-actions">{donation.status === 'pending_dropoff' && <><button type="button" onClick={() => updateDonation(donation, 'deposit')} disabled={busy}>我已投放</button><button type="button" onClick={() => updateDonation(donation, 'cancel')} disabled={busy}>取消申请</button></>}{donation.status === 'approved' && <span>已上架 · 可在柜位展示中领取</span>}{donation.status === 'returned' && <span>请联系教师取出实物</span>}</div></div></article>)}{donations.length === 0 && <p>暂无捐赠记录。</p>}</div>
+          <div className="donation-records"><h3>我的捐赠记录</h3>{donations.map((donation) => <article key={donation.id} className={`donation-record status-${donation.status}`}><img src={donation.photoUrl} alt={`${donation.name}原图`} /><div><strong>{donation.name}</strong><small>{donation.slotId} · {statusLabels[donation.status]}</small><p>规则建议 {donation.suggestedPoints} 分{donation.aiSuggestedPoints === null ? '' : ` · AI识别后系统建议 ${donation.aiSuggestedPoints} 分`}{donation.finalPoints === null ? '' : ` · 最终 ${donation.finalPoints} 分`}</p><p className={`ai-state ai-${donation.aiStatus}`}>{donation.aiStatus === 'pending' || donation.aiStatus === 'running' ? 'AI正在分析' : donation.aiStatus === 'succeeded' ? `AI分析完成：${donation.aiResult?.objectName ?? '已识别'}` : donation.aiStatus === 'failed' ? '暂时无法分析，教师仍可正常审核' : 'AI服务暂未启用'}</p>{donation.returnReason && <p>退回原因：{donation.returnReason}</p>}<div className="record-actions">{donation.status === 'pending_dropoff' && <><button type="button" onClick={() => updateDonation(donation, 'deposit')} disabled={busy}>我已投放</button><button type="button" onClick={() => updateDonation(donation, 'cancel')} disabled={busy}>取消申请</button></>}{donation.status === 'approved' && <span>已上架 · 可在柜位展示中领取</span>}{donation.status === 'returned' && <span>请联系教师取出实物</span>}</div></div></article>)}{donations.length === 0 && <p>暂无捐赠记录。</p>}</div>
         </div>
       </section>}
 
@@ -197,6 +204,7 @@ export function StudentPage({ session, refreshSession, onSelectItem, onLoggedOut
         <p>异常反馈交由教师人工处理，不会自动退款或调分。</p>
       </section>}
       {student && showTutorial && <OnboardingTutorial onComplete={finishTutorial} onSkip={finishTutorial} />}
+      {student && <AiAssistant />}
     </div>
   );
 }

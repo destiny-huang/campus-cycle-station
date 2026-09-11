@@ -1,17 +1,25 @@
 # 校园循环站 / Campus Cycle Station
 
-本仓库已完成 M4.5：在 M4 领取闭环基础上，加入正式登录首页、学生首次登录五步教程和教师教程状态重置。真实 AI 仍待后续开发。
+本仓库已完成 M5：在既有闭环上加入 OpenRouter 识物、系统模板估分、审核后异步卡通化和只读“循环小助手”。未配置 AI 或 AI 请求失败时，原有业务仍可正常使用。
 
-## 当前状态（2026-09-10）
+## 当前状态（2026-09-11）
 - 技术栈：React + TypeScript + Vite；Node 内置 HTTP API；独立 SQLite 文件。
 - 页面入口：`/student`、`/teacher`、`/locker-wall`。
 - 网站根路径 `/` 为正式欢迎与学生登录入口；首次登录会自动进入不改变积分和业务数据的新手教程。
 - 学生使用已导入名单中的姓名＋学号登录；教师可导入 CSV、搜索学生和发放劳动奖励。
 - 学生可提交单件真实照片物品并自动分柜；教师核实后上架。其他学生可确认价格、余额和柜位后直接领取，无需教师审批。
-- 健康接口：`/api/health`；AI 明确为 `mock` 模式，不调用真实服务。
+- 健康接口：`/api/health`；AI Key 未配置时自动禁用，核心业务仍可正常运行。
 - 未连接、修改或部署腾讯云服务器，未对 SubQuiz 执行操作。
 
 ## 本地启动
+
+带 OpenRouter AI 的最简单演示启动方式（口令和 Key 仅保留在当前 PowerShell 进程，不写文件）：
+
+```powershell
+.\scripts\start-ai-demo.ps1
+```
+
+没有 `OPENROUTER_API_KEY` 时也可继续使用原有登录、捐赠、审核、领取、柜墙和教程，AI 区域会显示“AI服务暂未启用”。
 
 需要 Node.js 22.12.0 或更高版本。新 PowerShell 窗口执行：
 
@@ -34,7 +42,7 @@ npm run dev
 
 演示账号为 `演示同学01` / `DEMO001` 至 `演示同学06` / `DEMO006`，每人首次初始化总额为 200 分。普通 CSV 新学生首次初始化为 20 分；重复导入、登录和重启不会重复发放。教师 CSV 表头为 `name,student_id,class_name`。
 
-体验捐赠：学生登录后每次上传一件 JPEG、PNG 或 WebP 原图（最大 3MB），系统按所选区域 FIFO 分配柜位；学生投放后由教师核实、改分并上架。建议分来自类别与成色模板，未接真实 AI。
+体验捐赠：学生登录后每次上传一件 JPEG、PNG 或 WebP 原图（最大 3MB），系统按所选区域 FIFO 分配柜位；AI 尝试识别物品与照片可见成色，系统按类别模板计算建议分，最终仍由教师核实实物后确认。识别失败时继续使用原有规则估分。
 
 体验领取：学生保持登录并进入“柜位展示”，打开标为“可领取”的真实物品，核对物品、所需积分、当前余额和柜位后确认。成功会立即扣分、核销物品并释放柜位，同时提示前往领取时柜位取物；历史记录保留当时的照片和柜位。柜内物品异常可在学生领取记录中反馈，由教师端人工标记处理，不会自动退款或调分。
 
@@ -48,11 +56,15 @@ npm run m2:check
 npm run m3:check
 npm run m4:check
 npm run m45:check
+npm run m5:check
 npm run typecheck
 npm run build
 ```
 
-数据库按环境隔离写入 `data/production/campus-cycle-station.sqlite` 或 `data/demo/campus-cycle-station.sqlite`，照片写入 `uploads/production/` 或 `uploads/demo/`，均不进入 Git。可用本地环境变量 `CYCLE_DB_PATH`、`CYCLE_UPLOAD_DIR` 指定其他路径。Node 22 的内置 SQLite API 仍会显示实验性警告，相关读写已实际验证。
+`m5:check` 完全使用 Mock，不产生真实费用。只有明确配置 `OPENROUTER_API_KEY` 后才可手动执行 `npm run m5:live-check`；该检查至多执行一次视觉、一次助手和一次图片请求。
+默认 Vision 与 Agent 模型为 `qwen/qwen3.5-9b`，Image 模型为 `google/gemini-3.1-flash-lite-image`；三者均可通过服务端环境变量覆盖。
+
+数据库按环境隔离写入 `data/production/campus-cycle-station.sqlite` 或 `data/demo/campus-cycle-station.sqlite`，原图写入 `uploads/`，卡通图写入 `generated/cartoon/`，均不进入 Git。可用 `CYCLE_DB_PATH`、`CYCLE_UPLOAD_DIR`、`CYCLE_GENERATED_DIR` 指定其他路径。Node 22 的内置 SQLite API 仍会显示实验性警告，相关读写已实际验证。
 
 ## 文件导航
 - AGENTS.md：执行边界与低上下文工作方式。

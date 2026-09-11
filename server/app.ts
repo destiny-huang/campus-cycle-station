@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { extname, join, resolve } from 'node:path';
+import { analyzeDonation, chatWithAgent, enqueueCartoonJob, getAiStatus, markDonationAiState, resolveCartoonPath, runNextCartoonJob } from './ai-service.js';
 import { parseStudentCsv } from './csv.js';
 import {
   addLaborReward, completeStudentOnboarding, createSession, deleteSession, findStudentForLogin, getLedger, getSession,
@@ -15,6 +16,7 @@ import {
   createLockerIssue, getRedemption, listStudentRedemptions, listTeacherIssues, listTeacherRedemptions,
   redeemDonation, resolveLockerIssue, resolveRedemptionPhotoPath,
 } from './redemptions.js';
+import { AiError, OpenRouterClient } from './openrouter.js';
 
 const COOKIE_NAME = 'cycle_session';
 const contentTypes: Record<string, string> = {
@@ -94,8 +96,22 @@ function donationHttpError(error: unknown) {
   return new HttpError(status, error.code, error.message, error.details);
 }
 
-export function createAppServer(database: AppDatabase, options: { teacherPassword?: string; uploadDirectory?: string } = {}) {
+export function createAppServer(database: AppDatabase, options: {
+  teacherPassword?: string; uploadDirectory?: string; generatedDirectory?: string; aiClient?: OpenRouterClient; backgroundAi?: boolean;
+} = {}) {
   const teacherPassword = options.teacherPassword ?? process.env.TEACHER_PASSWORD;
+  const aiClient = options.aiClient ?? new OpenRouterClient(database);
+  let cartoonRunnerActive = false;
+  const runCartoons = () => {
+    if (cartoonRunnerActive || options.backgroundAi === false) return;
+    cartoonRunnerActive = true;
+    void runNextCartoonJob(database, aiClient, options.uploadDirectory, options.generatedDirectory).then((job: any) => {
+      cartoonRunnerActive = false;
+      if (job?.status === 'pending') setTimeout(runCartoons, 1700).unref();
+      else if (database.connection.prepare("SELECT 1 FROM cartoon_jobs WHERE status = 'pending' AND next_attempt_at <= ? LIMIT 1").get(new Date().toISOString())) setImmediate(runCartoons);
+    }).catch(() => { cartoonRunnerActive = false; });
+  };
+  if (options.backgroundAi !== false) setImmediate(runCartoons);
 
   return createServer((request, response) => {
     void (async () => {
@@ -104,7 +120,7 @@ export function createAppServer(database: AppDatabase, options: { teacherPasswor
       if (request.method === 'GET' && url.pathname === '/api/health') {
         const check = database.connection.prepare('SELECT value FROM system_checks WHERE name = ?').get('m1-read-write') as { value: string } | undefined;
         sendJson(response, 200, { ok: true, service: 'campus-cycle-station-api', mode: database.mode,
-          database: { ok: check?.value === 'ok', engine: 'sqlite' }, ai: { mode: 'mock', label: '模拟模式，未调用真实 AI' } });
+          database: { ok: check?.value === 'ok', engine: 'sqlite' }, ai: { state: getAiStatus(database, aiClient.config).state } });
         return;
       }
 
@@ -148,6 +164,16 @@ export function createAppServer(database: AppDatabase, options: { teacherPasswor
           'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff' });
         createReadStream(path).pipe(response);
         return;
+      }
+
+      const cartoonMatch = /^\/api\/donations\/(\d+)\/cartoon$/.exec(url.pathname);
+      if (request.method === 'GET' && cartoonMatch) {
+        const donation = getDonation(database, Number(cartoonMatch[1]));
+        if (!donation || donation.status !== 'approved' || !donation.cartoonUrl) throw new HttpError(404, 'not_found', '卡通图尚未生成');
+        const path = resolveCartoonPath(database, String((database.connection.prepare('SELECT cartoon_filename FROM donations WHERE id = ?').get(donation.id) as { cartoon_filename: string }).cartoon_filename), options.generatedDirectory);
+        if (!existsSync(path)) throw new HttpError(404, 'image_missing', '卡通图文件不存在');
+        response.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': String(statSync(path).size), 'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff' });
+        createReadStream(path).pipe(response); return;
       }
 
       if (request.method === 'POST' && url.pathname === '/api/auth/student') {
@@ -219,8 +245,29 @@ export function createAppServer(database: AppDatabase, options: { teacherPasswor
         const idempotencyKey = String(body.idempotencyKey ?? '').trim();
         if (name.length < 1 || name.length > 100 || description.length > 500) throw new HttpError(400, 'invalid_donation', '名称为 1–100 字，说明最多 500 字');
         if (!['A', 'B', 'C'].includes(zone) || idempotencyKey.length < 16 || idempotencyKey.length > 128) throw new HttpError(400, 'invalid_donation', '尺寸区或请求标识无效');
-        try { sendJson(response, 201, { ok: true, ...createDonation(database, { studentId: session.studentId!, name, categoryId, condition, description, zone, photoDataUrl, idempotencyKey, uploadDirectory: options.uploadDirectory }) }); }
+        try {
+          const result = createDonation(database, { studentId: session.studentId!, name, categoryId, condition, description, zone, photoDataUrl, idempotencyKey, uploadDirectory: options.uploadDirectory });
+          if (!result.duplicate) {
+            markDonationAiState(database, result.donation.id, Boolean(aiClient.config.apiKey), options.uploadDirectory, aiClient.config.visionModel);
+            if (aiClient.config.apiKey && options.backgroundAi !== false) setImmediate(() => void analyzeDonation(database, aiClient, result.donation.id, options.uploadDirectory).catch(() => undefined));
+          }
+          sendJson(response, 201, { ok: true, duplicate: result.duplicate, donation: getDonation(database, result.donation.id) });
+        }
         catch (error) { throw donationHttpError(error); }
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/student/assistant') {
+        const session = requireSession(database, request, 'student');
+        const body = await readJson(request); const message = String(body.message ?? '').trim();
+        if (message.length < 1 || message.length > 1000) throw new HttpError(400, 'invalid_message', '请输入 1–1000 字的问题');
+        const history = Array.isArray(body.history) ? body.history.filter((item): item is { role: 'user' | 'assistant'; content: string } =>
+          item && (item.role === 'user' || item.role === 'assistant') && typeof item.content === 'string').slice(-16) : [];
+        try { sendJson(response, 200, { ok: true, ...(await chatWithAgent(database, aiClient, session.studentId!, { message, history })) }); }
+        catch (error) {
+          if (error instanceof AiError) throw new HttpError(error.code === 'budget_exhausted' ? 429 : 503, error.code, error.message);
+          throw error;
+        }
         return;
       }
 
@@ -304,6 +351,28 @@ export function createAppServer(database: AppDatabase, options: { teacherPasswor
         return;
       }
 
+      if (request.method === 'GET' && url.pathname === '/api/teacher/ai-status') {
+        requireSession(database, request, 'teacher');
+        sendJson(response, 200, { ai: getAiStatus(database, aiClient.config) }); return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/teacher/ai-test') {
+        requireSession(database, request, 'teacher');
+        try {
+          const result = await aiClient.chat('agent', aiClient.config.agentModel, { messages: [{ role: 'user', content: '只回答：连接正常' }], max_tokens: 20 });
+          sendJson(response, 200, { ok: true, model: aiClient.config.agentModel, reply: String(result.choices?.[0]?.message?.content ?? '').slice(0, 80) });
+        } catch (error) { if (error instanceof AiError) throw new HttpError(503, error.code, error.message); throw error; }
+        return;
+      }
+
+      const analyzeMatch = /^\/api\/teacher\/donations\/(\d+)\/analyze$/.exec(url.pathname);
+      if (request.method === 'POST' && analyzeMatch) {
+        requireSession(database, request, 'teacher');
+        try { sendJson(response, 200, { ok: true, donation: await analyzeDonation(database, aiClient, Number(analyzeMatch[1]), options.uploadDirectory, true) }); }
+        catch (error) { if (error instanceof AiError) throw new HttpError(503, error.code, error.message); throw donationHttpError(error); }
+        return;
+      }
+
       const resolveIssueMatch = /^\/api\/teacher\/issues\/(\d+)\/resolve$/.exec(url.pathname);
       if (request.method === 'POST' && resolveIssueMatch) {
         requireSession(database, request, 'teacher');
@@ -324,6 +393,7 @@ export function createAppServer(database: AppDatabase, options: { teacherPasswor
             : reviewDonation(database, Number(teacherAction[1]), {
               action: action as 'approve' | 'return', finalPoints: Number(body.finalPoints), reason: String(body.reason ?? ''),
             });
+          if (teacherAction[2] === 'review' && action === 'approve' && aiClient.config.apiKey) { enqueueCartoonJob(database, aiClient, Number(teacherAction[1])); setImmediate(runCartoons); }
           sendJson(response, 200, { ok: true, ...result });
         } catch (error) { throw donationHttpError(error); }
         return;

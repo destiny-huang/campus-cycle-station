@@ -1,6 +1,7 @@
 import { createAppServer } from './app.js';
 import { openDatabase, writeAndReadDatabaseCheck } from './database.js';
 import { seedDemoStudents } from './seed.js';
+import { readAiConfig } from './openrouter.js';
 
 const host = process.env.API_HOST ?? '127.0.0.1';
 const port = Number.parseInt(process.env.API_PORT ?? process.env.PORT ?? '3001', 10);
@@ -21,7 +22,8 @@ server.listen(port, host, () => {
   console.log(`校园循环站 API 已启动：http://${host}:${port}`);
   console.log(`运行模式：${database.mode}；SQLite：${database.path}`);
   if (database.mode === 'demo') console.log(`演示学生：${seed.total} 人（新增 ${seed.created}，已存在 ${seed.updated}）`);
-  console.log('AI：mock（模拟模式）');
+  const ai = readAiConfig();
+  console.log(`AI：${ai.apiKey ? 'OpenRouter 已配置' : '未启用（核心业务可正常使用）'}；模型：${ai.visionModel} / ${ai.imageModel} / ${ai.agentModel}`);
 });
 
 function shutdown() {

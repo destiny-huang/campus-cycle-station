@@ -12,6 +12,7 @@ export type DemoItem = {
   condition: string;
   note: string;
   photoUrl?: string;
+  cartoonUrl?: string;
   isReal?: boolean;
   donationId?: number;
 };

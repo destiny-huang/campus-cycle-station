@@ -20,7 +20,7 @@ seedDemoStudents(database);
 const demoSix = searchStudents(database, 'DEMO006')[0];
 addLaborReward(database, { studentId: demoSix.id, amount: 1, reason: 'M2 保留测试', idempotencyKey: 'm3-preserve-m2-reward-0001' });
 
-const server = createAppServer(database, { teacherPassword: 'm3-local-test-only', uploadDirectory });
+const server = createAppServer(database, { teacherPassword: 'm3-local-test-only', uploadDirectory, backgroundAi: false });
 await new Promise<void>((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
 const address = server.address();
 if (!address || typeof address === 'string') throw new Error('test server address unavailable');
