@@ -2,6 +2,9 @@
 node_modules/
 dist/
 dist-server/
+dist-app/
+.local-android-sdk/
+.local-tools/
 build/
 coverage/
 .vite/
@@ -18,6 +21,9 @@ test-results/
 *.key
 *.p12
 *.pfx
+*.jks
+*.keystore
+android/local.properties
 
 # Runtime data / uploads / backups (keep outside source in production)
 var/

@@ -78,6 +78,17 @@ const meAfter = await request('/api/student/me', {}, relogin.cookie);
 const ledger = meAfter.body.ledger as Array<{ amount: number }>;
 assert(meAfter.body.student.balance === 27 && ledger.reduce((sum, entry) => sum + entry.amount, 0) === 27, 'balance and ledger must agree');
 
+const nativePreflight = await fetch(`${base}/api/session`, { method: 'OPTIONS', headers: { Origin: 'https://localhost', 'Access-Control-Request-Method': 'GET' } });
+assert(nativePreflight.status === 204 && nativePreflight.headers.get('access-control-allow-origin') === 'https://localhost'
+  && nativePreflight.headers.get('access-control-allow-credentials') === 'true', 'Capacitor origin must receive credentialed CORS headers');
+const nativeLogin = await fetch(`${base}/api/auth/student`, { method: 'POST', headers: { Origin: 'https://localhost', 'Content-Type': 'application/json' },
+  body: JSON.stringify({ name: '同名同学', studentId: 'NORMAL001' }) });
+const nativeSetCookie = nativeLogin.headers.get('set-cookie') ?? '';
+assert(nativeLogin.status === 200 && /HttpOnly/i.test(nativeSetCookie) && /SameSite=None/i.test(nativeSetCookie) && /Secure/i.test(nativeSetCookie),
+  'Capacitor session cookie must remain HttpOnly and use secure cross-site policy');
+const rejectedPreflight = await fetch(`${base}/api/session`, { method: 'OPTIONS', headers: { Origin: 'https://untrusted.example' } });
+assert(rejectedPreflight.status === 403 && !rejectedPreflight.headers.get('access-control-allow-origin'), 'unknown origins must not receive CORS access');
+
 await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
 database.connection.close();
 database = openDatabase({ path: testPath, mode: 'demo' });
@@ -88,4 +99,4 @@ assert(persisted.balance === 27 && getLedger(database, persisted.id).length === 
 assert(searchStudents(database, 'DEMO').every((student) => student.balance === 200), 'restart seed must not reset demo balances');
 database.connection.close();
 
-console.log(JSON.stringify({ ok: true, testPath, checks: ['auth', 'same-name', 'initial-points', 'seed-import-idempotency', 'teacher', 'reward-idempotency', 'authorization', 'ledger', 'restart'] }));
+console.log(JSON.stringify({ ok: true, testPath, checks: ['auth', 'same-name', 'initial-points', 'seed-import-idempotency', 'teacher', 'reward-idempotency', 'authorization', 'ledger', 'capacitor-cors-cookie', 'restart'] }));

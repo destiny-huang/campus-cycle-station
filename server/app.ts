@@ -19,6 +19,7 @@ import {
 import { AiError, OpenRouterClient } from './openrouter.js';
 
 const COOKIE_NAME = 'cycle_session';
+const NATIVE_APP_ORIGINS = new Set(['https://localhost', 'capacitor://localhost']);
 const contentTypes: Record<string, string> = {
   '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml',
@@ -44,11 +45,32 @@ function readCookie(request: IncomingMessage) {
   return undefined;
 }
 
-function sessionCookie(token: string) {
-  return `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`;
+function isNativeAppRequest(request: IncomingMessage) {
+  return NATIVE_APP_ORIGINS.has(request.headers.origin ?? '');
 }
 
-function clearCookie() { return `${COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`; }
+function cookiePolicy(request: IncomingMessage) {
+  if (isNativeAppRequest(request)) return 'SameSite=None; Secure';
+  const forwardedProto = String(request.headers['x-forwarded-proto'] ?? '').split(',')[0]?.trim();
+  return `SameSite=Strict${forwardedProto === 'https' ? '; Secure' : ''}`;
+}
+
+function sessionCookie(token: string, request: IncomingMessage) {
+  return `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; ${cookiePolicy(request)}; Path=/; Max-Age=43200`;
+}
+
+function clearCookie(request: IncomingMessage) { return `${COOKIE_NAME}=; HttpOnly; ${cookiePolicy(request)}; Path=/; Max-Age=0`; }
+
+function applyNativeCors(request: IncomingMessage, response: ServerResponse) {
+  const origin = request.headers.origin ?? '';
+  if (!NATIVE_APP_ORIGINS.has(origin)) return false;
+  response.setHeader('Access-Control-Allow-Origin', origin);
+  response.setHeader('Access-Control-Allow-Credentials', 'true');
+  response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  response.setHeader('Vary', 'Origin');
+  return true;
+}
 
 async function readJson(request: IncomingMessage): Promise<JsonObject> {
   const contentType = request.headers['content-type'] ?? '';
@@ -123,6 +145,11 @@ export function createAppServer(database: AppDatabase, options: {
   return createServer((request, response) => {
     void (async () => {
       const url = new URL(request.url ?? '/', `http://${request.headers.host ?? '127.0.0.1'}`);
+      const nativeOriginAllowed = applyNativeCors(request, response);
+      if (request.method === 'OPTIONS' && url.pathname.startsWith('/api/')) {
+        if (!nativeOriginAllowed) throw new HttpError(403, 'origin_not_allowed', '当前来源不允许访问');
+        response.writeHead(204); response.end(); return;
+      }
 
       if (request.method === 'GET' && url.pathname === '/api/health') {
         const check = database.connection.prepare('SELECT value FROM system_checks WHERE name = ?').get('m1-read-write') as { value: string } | undefined;
@@ -193,7 +220,7 @@ export function createAppServer(database: AppDatabase, options: {
         deleteSession(database, readCookie(request));
         const token = createSession(database, 'student', student.id);
         sendJson(response, 200, { ok: true, role: 'student', student,
-          onboardingRequired: student.onboardingCompletedAt === null }, { 'Set-Cookie': sessionCookie(token) });
+          onboardingRequired: student.onboardingCompletedAt === null }, { 'Set-Cookie': sessionCookie(token, request) });
         return;
       }
 
@@ -204,13 +231,13 @@ export function createAppServer(database: AppDatabase, options: {
         if (!safePasswordEqual(password, teacherPassword)) throw new HttpError(401, 'invalid_credentials', '教师口令错误');
         deleteSession(database, readCookie(request));
         const token = createSession(database, 'teacher');
-        sendJson(response, 200, { ok: true, role: 'teacher' }, { 'Set-Cookie': sessionCookie(token) });
+        sendJson(response, 200, { ok: true, role: 'teacher' }, { 'Set-Cookie': sessionCookie(token, request) });
         return;
       }
 
       if (request.method === 'POST' && url.pathname === '/api/auth/logout') {
         deleteSession(database, readCookie(request));
-        sendJson(response, 200, { ok: true }, { 'Set-Cookie': clearCookie() });
+        sendJson(response, 200, { ok: true }, { 'Set-Cookie': clearCookie(request) });
         return;
       }
 

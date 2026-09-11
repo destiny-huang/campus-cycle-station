@@ -12,12 +12,14 @@
 2026-09-11：正式域名 `https://cycle.bdfzscc.com` 已启用独立 Nginx 反向代理与 TLS，HTTP 自动 301 跳转 HTTPS；公网 9350 暂时保留为回退入口。
 2026-09-11：修复手机端拍照入口；捐赠照片支持直接调用后置相机、选择后即时预览，并在浏览器本地将过大的相机照片优化为服务端支持的 JPEG。
 2026-09-11：完成 PWA 本地实现，包含安装清单、192/512/Maskable 与 Apple 图标、Service Worker、离线安全提示和轻量安装入口；业务 API、会话及用户图片不进入离线缓存。
+2026-09-11：完成 Android Capacitor 第一阶段：采用 `com.bdfzscc.campuscycle` 包装同一套前端，接入正式 HTTPS API、原生相机/照片选择器、会话 CORS、安全 Cookie、返回键、网络提示、品牌图标与启动页；Debug APK 已构建，因本机无 ADB 设备和模拟器，真机流程待验收。
 
 ## 当前阶段
 M0–M6 已完成，生产服务运行中。
 
 ## 验证
 `typecheck`、`m2:check`、`m3:check`、`m4:check`、`m45:check`、Mock `m5:check` 和生产构建均通过。Vision 使用 `qwen/qwen3.5-9b` 真实完成图片输入与结构化解析；Agent 同模型真实 tool calling 已通过；Image 使用 `google/gemini-3.1-flash-lite-image` 真实生成已通过。
+Android 的 `app:check`、Capacitor sync 与 Gradle Debug 构建通过；APK 包名、应用名、签名和最小权限已检查。当前无连接的 Android 真机且未安装 Emulator，原生相机、返回键和断网交互尚未做设备验收。
 服务器上同一生产构建的 M2–M5 独立临时数据检查全部通过，三类 OpenRouter 真实调用均成功；正式域名的首页、学生端、教师端、柜墙与健康接口实测 200，TLS 校验通过。备份已完成 SHA-256 校验、独立临时路径恢复及 SQLite `integrity_check`。
 
 ## 数据与待定项

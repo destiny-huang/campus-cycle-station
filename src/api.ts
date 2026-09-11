@@ -1,3 +1,5 @@
+import { apiUrl } from './platform';
+
 export type Role = 'student' | 'teacher';
 export type Student = {
   id: number; studentId: string; name: string; className: string; balance: number;
@@ -45,14 +47,23 @@ export class ApiError extends Error {
   }
 }
 
+function withNativeMediaUrls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withNativeMediaUrls);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key,
+    (key === 'photoUrl' || key === 'cartoonUrl') && typeof entry === 'string' ? apiUrl(entry) : withNativeMediaUrls(entry),
+  ]));
+}
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
+  const response = await fetch(apiUrl(path), {
     ...options,
+    credentials: 'include',
     headers: options.body ? { 'Content-Type': 'application/json', ...options.headers } : options.headers,
   });
   const body = await response.json() as T & { code?: string; message?: string };
   if (!response.ok) throw new ApiError(response.status, body.code ?? 'request_failed', body.message ?? '请求失败', body as Record<string, unknown>);
-  return body;
+  return withNativeMediaUrls(body) as T;
 }
 
 export const postJson = <T>(path: string, body: unknown) => api<T>(path, { method: 'POST', body: JSON.stringify(body) });

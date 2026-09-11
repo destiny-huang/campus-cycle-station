@@ -11,6 +11,7 @@
 - 健康接口：`/api/health`；AI Key 未配置时自动禁用，核心业务仍可正常运行。
 - 生产环境已使用独立服务、数据和端口部署；未对服务器其他项目执行操作。
 - 前端支持 PWA，可从浏览器安装到手机或电脑桌面；离线状态仅显示安全提示，不缓存账号、积分、物品或上传图片。
+- Android App 使用 Capacitor 包装同一套前端，原生模式固定连接 `https://cycle.bdfzscc.com`，Web/PWA 仍使用同源 API。
 
 ## 生产访问
 
@@ -57,6 +58,15 @@ npm run dev
 
 安装 PWA：Android 或桌面浏览器可点击页面顶部“安装应用”；iPhone / iPad 请在 Safari 中点击“分享”→“添加到主屏幕”。安装后仍需联网完成登录、积分、捐赠、领取和 AI 操作，Service Worker 不缓存业务接口或个人数据。
 
+Android 开发构建（Capacitor 8 当前需要 JDK 21、Android SDK API 36 与 Build Tools 35）：
+
+```powershell
+npm run app:check
+npm run app:android:debug
+```
+
+原生 App 使用系统相机与系统照片选择器，不申请位置、通讯录、短信、麦克风或广泛媒体读取权限。调试包输出在 `android/app/build/outputs/apk/debug/app-debug.apk`；本地交付副本放在已忽略的 `dist-app/`。正式签名方法见 `docs/android-release.md`。
+
 体验领取：学生保持登录并进入“柜位展示”，打开标为“可领取”的真实物品，核对物品、所需积分、当前余额和柜位后确认。成功会立即扣分、核销物品并释放柜位，同时提示前往领取时柜位取物；历史记录保留当时的照片和柜位。柜内物品异常可在学生领取记录中反馈，由教师端人工标记处理，不会自动退款或调分。
 
 首次登录教程完成或跳过后不会再次自动出现；学生可在学生端点击“使用帮助 / 新手教程”重看。教师搜索并选中学生后可重置教程状态，此操作不影响积分、流水、捐赠、领取或柜位。
@@ -71,6 +81,7 @@ npm run m4:check
 npm run m45:check
 npm run m5:check
 npm run pwa:check
+npm run app:check
 npm run typecheck
 npm run build
 ```

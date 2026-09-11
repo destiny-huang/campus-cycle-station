@@ -4,6 +4,7 @@ import { DEMO_ITEMS, type DemoItem } from './demo-data';
 import { OnboardingTutorial } from './OnboardingTutorial';
 import { AiAssistant } from './AiAssistant';
 import { createRequestId } from './request-id';
+import { chooseNativePhoto, isCameraCancellation, isNativeApp, takeNativePhoto } from './platform';
 
 const itemIcons = { book: '📚', lamp: '💡', ball: '🏀', bag: '🎒' };
 const categories = [
@@ -159,6 +160,18 @@ export function StudentPage({ session, refreshSession, onSelectItem, onLoggedOut
     finally { setPhotoBusy(false); event.target.value = ''; }
   }
 
+  async function selectNativePhoto(source: 'camera' | 'gallery') {
+    setPhotoBusy(true); setMessage(source === 'camera' ? '正在打开相机…' : '正在打开系统相册…');
+    try {
+      const file = source === 'camera' ? await takeNativePhoto() : await chooseNativePhoto();
+      const prepared = await preparePhoto(file);
+      setPhotoDataUrl(prepared.dataUrl); setPhotoName(prepared.displayName); setMessage('照片已选择，可以继续填写并提交。');
+    } catch (error) {
+      if (isCameraCancellation(error)) setMessage('已取消选择，没有创建捐赠记录。');
+      else setMessage((error as Error).message || '照片选择失败，请重试');
+    } finally { setPhotoBusy(false); }
+  }
+
   async function submitDonation(event: FormEvent) {
     event.preventDefault();
     if (!photoDataUrl) { setMessage('请先选择一张真实物品照片'); return; }
@@ -241,8 +254,13 @@ export function StudentPage({ session, refreshSession, onSelectItem, onLoggedOut
               <div className="photo-picker wide-field">
                 <span className="photo-picker-title">真实照片</span>
                 <div className="photo-source-actions">
-                  <label className="photo-source-button">📷 直接拍照<input type="file" accept="image/*" capture="environment" onChange={selectPhoto} disabled={photoBusy} /></label>
-                  <label className="photo-source-button secondary">从相册选择<input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={selectPhoto} disabled={photoBusy} /></label>
+                  {isNativeApp ? <>
+                    <button className="photo-source-button" type="button" onClick={() => void selectNativePhoto('camera')} disabled={photoBusy}>📷 直接拍照</button>
+                    <button className="photo-source-button secondary" type="button" onClick={() => void selectNativePhoto('gallery')} disabled={photoBusy}>从相册选择</button>
+                  </> : <>
+                    <label className="photo-source-button">📷 直接拍照<input type="file" accept="image/*" capture="environment" onChange={selectPhoto} disabled={photoBusy} /></label>
+                    <label className="photo-source-button secondary">从相册选择<input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={selectPhoto} disabled={photoBusy} /></label>
+                  </>}
                 </div>
                 {photoDataUrl && <img className="photo-selection-preview" src={photoDataUrl} alt="已选择的物品照片预览" />}
                 <small>{photoBusy ? '正在处理手机照片…' : photoName || '拍照会优先打开后置相机；大图会在本机自动优化为 3MB 以内的 JPEG。也支持从相册选择 JPEG、PNG、WebP。'}</small>

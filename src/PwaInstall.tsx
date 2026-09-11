@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { isNativeApp } from './platform';
 
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -29,7 +30,7 @@ export function PwaInstall() {
     };
   }, []);
 
-  if (installed) return null;
+  if (installed || isNativeApp) return null;
 
   async function install() {
     if (!promptEvent) { setShowHelp((value) => !value); return; }

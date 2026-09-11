@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.12.0" },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "concurrently -k -n api,web -c cyan,green \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "tsx watch server/index.ts",
@@ -16,15 +18,23 @@
     "m5:check": "tsx server/m5-check.ts",
     "m5:live-check": "tsx server/m5-live-check.ts",
     "pwa:check": "node scripts/pwa-check.mjs",
+    "app:check": "node scripts/app-check.mjs",
+    "app:sync": "npm run build && cap sync android",
+    "app:android:debug": "npm run app:sync && cd android && gradlew.bat assembleDebug",
     "typecheck": "tsc -b --pretty false",
     "build": "npm run typecheck && vite build && tsc -p tsconfig.server.json",
     "start": "node dist-server/index.js"
   },
   "dependencies": {
+    "@capacitor/android": "8.5.1",
+    "@capacitor/app": "8.1.1",
+    "@capacitor/camera": "8.2.4",
+    "@capacitor/core": "8.5.1",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.5.1",
     "@types/node": "22.20.1",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",
