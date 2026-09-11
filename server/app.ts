@@ -22,6 +22,7 @@ const COOKIE_NAME = 'cycle_session';
 const contentTypes: Record<string, string> = {
   '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml',
+  '.png': 'image/png', '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
 
 type JsonObject = Record<string, unknown>;
@@ -83,9 +84,15 @@ function safePasswordEqual(actual: string, expected: string) {
 function serveFrontend(pathname: string, response: ServerResponse) {
   const dist = resolve('dist');
   const requested = join(dist, pathname === '/' ? 'index.html' : pathname);
+  if (pathname.startsWith('/assets/') && (!existsSync(requested) || !statSync(requested).isFile())) {
+    sendJson(response, 404, { ok: false, error: 'asset_not_found' }); return;
+  }
   const file = existsSync(requested) && statSync(requested).isFile() ? requested : join(dist, 'index.html');
   if (!existsSync(file)) { sendJson(response, 404, { ok: false, error: 'frontend_not_built' }); return; }
-  response.writeHead(200, { 'Content-Type': contentTypes[extname(file)] ?? 'application/octet-stream' });
+  const name = file.replace(/\\/g, '/').split('/').at(-1) ?? '';
+  const cacheControl = name === 'sw.js' || name === 'manifest.webmanifest' || name === 'index.html'
+    ? 'no-cache' : file.replace(/\\/g, '/').includes('/assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=86400';
+  response.writeHead(200, { 'Content-Type': contentTypes[extname(file)] ?? 'application/octet-stream', 'Cache-Control': cacheControl, 'X-Content-Type-Options': 'nosniff' });
   createReadStream(file).pipe(response);
 }
 

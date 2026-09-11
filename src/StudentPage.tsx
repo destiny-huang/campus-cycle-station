@@ -18,13 +18,67 @@ const statusLabels: Record<Donation['status'], string> = {
 };
 type Profile = { student: Student; ledger: LedgerEntry[] };
 
-function readPhoto(file: File) {
+const MAX_PHOTO_BYTES = 3 * 1024 * 1024;
+const MAX_PHOTO_EDGE = 2048;
+const supportedPhotoTypes = ['image/jpeg', 'image/png', 'image/webp'];
+
+function readPhoto(file: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
     reader.onerror = () => reject(new Error('照片读取失败'));
     reader.readAsDataURL(file);
   });
+}
+
+function loadPhotoSource(file: File) {
+  return new Promise<{ source: CanvasImageSource; width: number; height: number; cleanup: () => void }>((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => resolve({ source: image, width: image.naturalWidth, height: image.naturalHeight, cleanup: () => URL.revokeObjectURL(url) });
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('当前浏览器无法读取这张照片，请改用 JPEG、PNG 或 WebP 格式')); };
+    image.src = url;
+  });
+}
+
+function canvasJpeg(canvas: HTMLCanvasElement, quality: number) {
+  return new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => {
+    if (blob) resolve(blob); else reject(new Error('照片处理失败，请重新拍照或从相册选择'));
+  }, 'image/jpeg', quality));
+}
+
+async function preparePhoto(file: File) {
+  const looksLikeImage = file.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/i.test(file.name);
+  if (!looksLikeImage) throw new Error('请选择真实物品照片');
+  if (supportedPhotoTypes.includes(file.type) && file.size <= MAX_PHOTO_BYTES) {
+    return { dataUrl: await readPhoto(file), displayName: file.name };
+  }
+
+  const decoded = await loadPhotoSource(file);
+  try {
+    if (!decoded.width || !decoded.height) throw new Error('照片尺寸无效，请重新拍照');
+    const initialScale = Math.min(1, MAX_PHOTO_EDGE / Math.max(decoded.width, decoded.height));
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('当前浏览器无法处理照片，请从相册选择较小的 JPEG 图片');
+
+    for (const sizeFactor of [1, 0.85, 0.7, 0.55]) {
+      canvas.width = Math.max(1, Math.round(decoded.width * initialScale * sizeFactor));
+      canvas.height = Math.max(1, Math.round(decoded.height * initialScale * sizeFactor));
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(decoded.source, 0, 0, canvas.width, canvas.height);
+      for (const quality of [0.9, 0.78, 0.66, 0.55]) {
+        const blob = await canvasJpeg(canvas, quality);
+        if (blob.size <= MAX_PHOTO_BYTES) {
+          const baseName = file.name.replace(/\.[^.]+$/, '') || 'camera-photo';
+          return { dataUrl: await readPhoto(blob), displayName: `${baseName}.jpg（已优化）` };
+        }
+      }
+    }
+    throw new Error('照片处理后仍超过 3MB，请靠近物品重新拍摄');
+  } finally {
+    decoded.cleanup();
+  }
 }
 
 export function StudentPage({ session, refreshSession, onSelectItem, onLoggedOut }: {
@@ -52,6 +106,7 @@ export function StudentPage({ session, refreshSession, onSelectItem, onLoggedOut
   const [zone, setZone] = useState<'A' | 'B' | 'C'>('A');
   const [photoDataUrl, setPhotoDataUrl] = useState('');
   const [photoName, setPhotoName] = useState('');
+  const [photoBusy, setPhotoBusy] = useState(false);
   const [donationKey, setDonationKey] = useState(createRequestId);
   const [completed, setCompleted] = useState<Donation | null>(null);
   const donationRef = useRef<HTMLElement>(null);
@@ -95,11 +150,13 @@ export function StudentPage({ session, refreshSession, onSelectItem, onLoggedOut
   async function selectPhoto(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 3 * 1024 * 1024) {
-      setMessage('请选择 3MB 以内的 JPEG、PNG 或 WebP 图片'); event.target.value = ''; return;
+    setPhotoBusy(true); setMessage('正在读取照片…');
+    try {
+      const prepared = await preparePhoto(file);
+      setPhotoDataUrl(prepared.dataUrl); setPhotoName(prepared.displayName); setMessage('照片已选择，可以继续填写并提交。');
     }
-    try { setPhotoDataUrl(await readPhoto(file)); setPhotoName(file.name); setMessage(''); }
     catch (error) { setMessage((error as Error).message); }
+    finally { setPhotoBusy(false); event.target.value = ''; }
   }
 
   async function submitDonation(event: FormEvent) {
@@ -181,9 +238,17 @@ export function StudentPage({ session, refreshSession, onSelectItem, onLoggedOut
               <label>成色<select value={condition} onChange={(event) => setCondition(event.target.value)}>{conditions.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
               <label>尺寸区<select value={zone} onChange={(event) => setZone(event.target.value as 'A' | 'B' | 'C')}><option value="A">A区 · 小件</option><option value="B">B区 · 中件</option><option value="C">C区 · 大件</option></select></label>
               <label className="wide-field">说明<textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={500} placeholder="完整程度、缺页或配件情况请如实填写" /></label>
-              <label className="photo-picker wide-field">真实照片<input type="file" accept="image/jpeg,image/png,image/webp" onChange={selectPhoto} required={!photoDataUrl} /><small>{photoName || '支持 JPEG、PNG、WebP，最大 3MB；拍照背景尽量干净，避免个人信息。'}</small></label>
+              <div className="photo-picker wide-field">
+                <span className="photo-picker-title">真实照片</span>
+                <div className="photo-source-actions">
+                  <label className="photo-source-button">📷 直接拍照<input type="file" accept="image/*" capture="environment" onChange={selectPhoto} disabled={photoBusy} /></label>
+                  <label className="photo-source-button secondary">从相册选择<input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={selectPhoto} disabled={photoBusy} /></label>
+                </div>
+                {photoDataUrl && <img className="photo-selection-preview" src={photoDataUrl} alt="已选择的物品照片预览" />}
+                <small>{photoBusy ? '正在处理手机照片…' : photoName || '拍照会优先打开后置相机；大图会在本机自动优化为 3MB 以内的 JPEG。也支持从相册选择 JPEG、PNG、WebP。'}</small>
+              </div>
               <p className="rule-estimate wide-field">照片上传后 AI 会尝试识别物品和可见成色；积分仍由系统模板计算并由教师检查实物后确认。AI 不可用时自动保留规则估分。</p>
-              <button className="real-action wide-field" type="submit" disabled={busy}>{busy ? '提交中…' : '提交单件申请并分配柜位'}</button>
+              <button className="real-action wide-field" type="submit" disabled={busy || photoBusy}>{busy ? '提交中…' : photoBusy ? '正在处理照片…' : '提交单件申请并分配柜位'}</button>
             </>}
           </form>
           <div className="donation-records"><h3>我的捐赠记录</h3>{donations.map((donation) => <article key={donation.id} className={`donation-record status-${donation.status}`}><img src={donation.photoUrl} alt={`${donation.name}原图`} /><div><strong>{donation.name}</strong><small>{donation.slotId} · {statusLabels[donation.status]}</small><p>规则建议 {donation.suggestedPoints} 分{donation.aiSuggestedPoints === null ? '' : ` · AI识别后系统建议 ${donation.aiSuggestedPoints} 分`}{donation.finalPoints === null ? '' : ` · 最终 ${donation.finalPoints} 分`}</p><p className={`ai-state ai-${donation.aiStatus}`}>{donation.aiStatus === 'pending' || donation.aiStatus === 'running' ? 'AI正在分析' : donation.aiStatus === 'succeeded' ? `AI分析完成：${donation.aiResult?.objectName ?? '已识别'}` : donation.aiStatus === 'failed' ? '暂时无法分析，教师仍可正常审核' : 'AI服务暂未启用'}</p>{donation.returnReason && <p>退回原因：{donation.returnReason}</p>}<div className="record-actions">{donation.status === 'pending_dropoff' && <><button type="button" onClick={() => updateDonation(donation, 'deposit')} disabled={busy}>我已投放</button><button type="button" onClick={() => updateDonation(donation, 'cancel')} disabled={busy}>取消申请</button></>}{donation.status === 'approved' && <span>已上架 · 可在柜位展示中领取</span>}{donation.status === 'returned' && <span>请联系教师取出实物</span>}</div></div></article>)}{donations.length === 0 && <p>暂无捐赠记录。</p>}</div>

@@ -3,6 +3,7 @@ import { api, type Session } from './api';
 import { DemoDialog } from './DemoDialog';
 import { HomePage } from './HomePage';
 import { LockerWallPage } from './LockerWallPage';
+import { PwaInstall } from './PwaInstall';
 import { StudentPage } from './StudentPage';
 import { TeacherPage } from './TeacherPage';
 import type { DemoItem } from './demo-data';
@@ -61,7 +62,7 @@ export default function App() {
       <header className="topbar">
         <button className="brand" type="button" onClick={() => navigate('home')}><span className="brand-mark">循</span><span><strong>校园循环站</strong><small>Campus Cycle Station</small></span></button>
         <nav aria-label="页面入口">{(Object.keys(routes) as Exclude<PageKey, 'home'>[]).map((key) => <button className={page === key ? 'active' : ''} key={key} type="button" onClick={() => navigate(key)}>{routes[key].label}</button>)}</nav>
-        <HealthBadge health={health} />
+        <div className="topbar-actions"><PwaInstall /><HealthBadge health={health} /></div>
       </header>
       <main>
         {page === 'home' && <HomePage session={session} refreshSession={refreshSession} navigate={navigate} />}

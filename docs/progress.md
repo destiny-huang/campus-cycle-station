@@ -10,6 +10,8 @@
 2026-09-11：M6 完成 `2026txy` 独立生产部署，服务 `campus-cycle-station.service` 监听 9350，生产 SQLite、原图、卡通图和 EnvironmentFile 均与现有项目隔离。
 2026-09-11：修复公网 HTTP 非安全上下文不支持 `crypto.randomUUID()` 导致学生端和教师端首屏空白；请求幂等 ID 增加 Web Crypto 与兼容回退。
 2026-09-11：正式域名 `https://cycle.bdfzscc.com` 已启用独立 Nginx 反向代理与 TLS，HTTP 自动 301 跳转 HTTPS；公网 9350 暂时保留为回退入口。
+2026-09-11：修复手机端拍照入口；捐赠照片支持直接调用后置相机、选择后即时预览，并在浏览器本地将过大的相机照片优化为服务端支持的 JPEG。
+2026-09-11：完成 PWA 本地实现，包含安装清单、192/512/Maskable 与 Apple 图标、Service Worker、离线安全提示和轻量安装入口；业务 API、会话及用户图片不进入离线缓存。
 
 ## 当前阶段
 M0–M6 已完成，生产服务运行中。
