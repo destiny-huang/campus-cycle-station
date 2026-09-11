@@ -3,6 +3,7 @@ import { api, postJson, type Donation, type LedgerEntry, type Redemption, type S
 import { DEMO_ITEMS, type DemoItem } from './demo-data';
 import { OnboardingTutorial } from './OnboardingTutorial';
 import { AiAssistant } from './AiAssistant';
+import { createRequestId } from './request-id';
 
 const itemIcons = { book: '📚', lamp: '💡', ball: '🏀', bag: '🎒' };
 const categories = [
@@ -39,7 +40,7 @@ export function StudentPage({ session, refreshSession, onSelectItem, onLoggedOut
   const [redemptions, setRedemptions] = useState<Redemption[]>([]);
   const [issueFor, setIssueFor] = useState<number | null>(null);
   const [issueText, setIssueText] = useState('');
-  const [issueKey, setIssueKey] = useState(() => crypto.randomUUID());
+  const [issueKey, setIssueKey] = useState(createRequestId);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
@@ -51,7 +52,7 @@ export function StudentPage({ session, refreshSession, onSelectItem, onLoggedOut
   const [zone, setZone] = useState<'A' | 'B' | 'C'>('A');
   const [photoDataUrl, setPhotoDataUrl] = useState('');
   const [photoName, setPhotoName] = useState('');
-  const [donationKey, setDonationKey] = useState(() => crypto.randomUUID());
+  const [donationKey, setDonationKey] = useState(createRequestId);
   const [completed, setCompleted] = useState<Donation | null>(null);
   const donationRef = useRef<HTMLElement>(null);
   const previewCategories = ['全部', ...new Set(DEMO_ITEMS.map((item) => item.category))];
@@ -118,7 +119,7 @@ export function StudentPage({ session, refreshSession, onSelectItem, onLoggedOut
 
   function continueDonation() {
     setCompleted(null); setItemName(''); setDescription(''); setPhotoDataUrl(''); setPhotoName('');
-    setDonationKey(crypto.randomUUID()); setMessage('已开启一件新的捐赠申请。');
+    setDonationKey(createRequestId()); setMessage('已开启一件新的捐赠申请。');
     window.setTimeout(() => donationRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
   }
 
@@ -137,7 +138,7 @@ export function StudentPage({ session, refreshSession, onSelectItem, onLoggedOut
     try {
       await postJson(`/api/student/redemptions/${redemption.id}/issues`, { description: issueText, idempotencyKey: issueKey });
       setMessage('柜位异常已记录，教师会人工处理；系统不会自动退款或调分。');
-      setIssueFor(null); setIssueText(''); setIssueKey(crypto.randomUUID());
+      setIssueFor(null); setIssueText(''); setIssueKey(createRequestId());
     } catch (error) { setMessage((error as Error).message); }
     finally { setBusy(false); }
   }
@@ -197,7 +198,7 @@ export function StudentPage({ session, refreshSession, onSelectItem, onLoggedOut
             <img src={claim.photoUrl} alt={`${claim.itemName}领取原图`} />
             <div><strong>{claim.itemName}</strong><small>消耗 {claim.pointsSpent} 分 · 领取时柜位 {claim.slotId}</small><time>{new Date(claim.createdAt).toLocaleString('zh-CN')}</time></div>
             {issueFor === claim.id ? <div className="issue-form"><textarea value={issueText} onChange={(event) => setIssueText(event.target.value)} maxLength={300} placeholder="例如：柜内没有物品、柜内仍有旧物" /><button className="real-action" type="button" disabled={busy || issueText.trim().length < 2} onClick={() => reportIssue(claim)}>提交异常</button></div>
-              : <button type="button" onClick={() => { setIssueFor(claim.id); setIssueKey(crypto.randomUUID()); }}>柜位异常</button>}
+              : <button type="button" onClick={() => { setIssueFor(claim.id); setIssueKey(createRequestId()); }}>柜位异常</button>}
           </article>)}
           {redemptions.length === 0 && <p>暂无领取记录；请在柜位展示中领取已上架物品。</p>}
         </div>

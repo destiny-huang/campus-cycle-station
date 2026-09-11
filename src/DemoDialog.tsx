@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { postJson, type Redemption, type Session, type Student } from './api';
 import type { DemoItem } from './demo-data';
+import { createRequestId } from './request-id';
 
 const icons = { book: '📚', lamp: '💡', ball: '🏀', bag: '🎒' };
 const statusLabels = { empty: '空闲', reserved: '待投放', review: '待审核', available: '审核通过', returned: '待移出', disabled: '停用' };
@@ -13,7 +14,7 @@ export function DemoDialog({ item, session, onClose, onRedeemed }: {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [success, setSuccess] = useState<Redemption | null>(null);
-  const [requestKey] = useState(() => crypto.randomUUID());
+  const [requestKey] = useState(createRequestId);
 
   useEffect(() => {
     closeRef.current?.focus();

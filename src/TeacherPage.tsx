@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, postJson, type AiStatus, type Donation, type LockerIssue, type LockerSlot, type Redemption, type Session, type Student } from './api';
+import { createRequestId } from './request-id';
 
 export function TeacherPage({ session, refreshSession, onLoggedOut }: {
   session: Session | null; refreshSession: () => Promise<Session>; onLoggedOut: () => void;
@@ -10,7 +11,7 @@ export function TeacherPage({ session, refreshSession, onLoggedOut }: {
   const [selected, setSelected] = useState<Student | null>(null);
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
-  const [rewardKey, setRewardKey] = useState(() => crypto.randomUUID());
+  const [rewardKey, setRewardKey] = useState(createRequestId);
   const [csv, setCsv] = useState('');
   const [csvName, setCsvName] = useState('');
   const [donations, setDonations] = useState<Donation[]>([]);
@@ -86,7 +87,7 @@ export function TeacherPage({ session, refreshSession, onLoggedOut }: {
         studentId: selected.id, amount: Number(amount), reason, idempotencyKey: rewardKey,
       });
       setMessage(result.duplicate ? '该请求已处理，未重复增加积分。' : `已为 ${result.student.name} 发放 ${amount} 分并写入流水。`);
-      setSelected(result.student); setAmount(''); setReason(''); setRewardKey(crypto.randomUUID()); await loadStudents();
+      setSelected(result.student); setAmount(''); setReason(''); setRewardKey(createRequestId()); await loadStudents();
     } catch (error) { setMessage((error as Error).message); }
     finally { setBusy(false); }
   }
@@ -185,7 +186,7 @@ export function TeacherPage({ session, refreshSession, onLoggedOut }: {
         <section className="student-admin">
           <header className="section-heading"><div><p className="section-kicker">真实数据库</p><h2>搜索学生与劳动加分</h2></div><span>显示身份、余额和教程状态</span></header>
           <label className="search-field">姓名或学号<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="输入姓名或学号；留空显示全部" /></label>
-          <div className="real-student-list">{students.map((student) => <button className={selected?.id === student.id ? 'active' : ''} type="button" key={student.id} onClick={() => { setSelected(student); setRewardKey(crypto.randomUUID()); setMessage(''); }}><span><strong>{student.name}</strong><small>{student.className} · {student.studentId}</small></span><b>{student.balance} 分<small>教程：{student.onboardingCompletedAt ? '已完成' : '未完成'}</small></b></button>)}{students.length === 0 && <p>暂无匹配学生。可先导入 CSV 名单。</p>}</div>
+          <div className="real-student-list">{students.map((student) => <button className={selected?.id === student.id ? 'active' : ''} type="button" key={student.id} onClick={() => { setSelected(student); setRewardKey(createRequestId()); setMessage(''); }}><span><strong>{student.name}</strong><small>{student.className} · {student.studentId}</small></span><b>{student.balance} 分<small>教程：{student.onboardingCompletedAt ? '已完成' : '未完成'}</small></b></button>)}{students.length === 0 && <p>暂无匹配学生。可先导入 CSV 名单。</p>}</div>
           {selected && <form className="reward-form" onSubmit={reward}><p>为 <strong>{selected.name}</strong> 发放劳动奖励</p><label>整数积分<input type="number" min="1" max="10000" step="1" value={amount} onChange={(event) => setAmount(event.target.value)} required /></label><label>原因<input value={reason} onChange={(event) => setReason(event.target.value)} minLength={2} maxLength={200} required placeholder="例如：整理循环站物品" /></label><button className="real-action" type="submit" disabled={busy}>确认发放</button><small>失败重试沿用同一请求标识；成功后新奖励使用新标识。</small></form>}
         </section>
 
